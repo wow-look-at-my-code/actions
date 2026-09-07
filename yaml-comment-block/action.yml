@@ -1,5 +1,5 @@
 name: YAML Comment Block
-description: Fail CI when a GitHub Actions YAML file in the local call chain carries more than 1 comment line in a row
+description: Fail CI when a GitHub Actions YAML file carries more than 1 comment line in a row
 
 inputs:
   paths:
@@ -21,38 +21,20 @@ runs:
   using: composite
   steps:
     # The rule lives in slopfmt, which owns every prose and YAML rule the org applies. A second copy here would drift from it.
-    - name: Install slopfmt (Linux)
-      if: runner.os == 'Linux'
-      shell: bash
-      run: |
-        set -euo pipefail
-        curl -fsSL https://apt.pazer.build/slopfmt/install.sh | sudo sh
-        sudo apt-get install -y slopfmt
-
-    - name: Install slopfmt (macOS)
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        set -euo pipefail
-        brew tap pazer/build https://brew.pazer.build/tap.git
-        brew trust pazer/build
-        brew install pazer/build/slopfmt
-
-    # A runner with no install path must say so here, because reaching the check step reports a missing command instead.
-    - name: Refuse a runner with no install path
-      if: runner.os != 'Linux' && runner.os != 'macOS'
-      shell: bash
-      run: |
-        echo "::error::yaml-comment-block installs slopfmt through APT or Homebrew, and ${RUNNER_OS} has neither. Run this check on a Linux or macOS runner."
-        exit 1
+    - name: Download slopfmt
+      id: slopfmt
+      uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
+      with:
+        project: slopfmt
 
     # slopfmt exits non-zero when the walk selects no file, so a step placed ahead of the checkout fails rather than passing on an empty workspace.
     - name: Check comment blocks
       shell: bash
       env:
+        SLOPFMT: ${{ steps.slopfmt.outputs.path }}
         INPUT_PATHS: ${{ inputs.paths }}
         INPUT_EXCLUDE: ${{ inputs.exclude }}
       run: |
         set -euo pipefail
         # INPUT_PATHS is a list of paths, so it is deliberately unquoted.
-        slopfmt workflows --only yaml/comment-block $INPUT_PATHS ${INPUT_EXCLUDE:+--exclude "$INPUT_EXCLUDE"}
+        "$SLOPFMT" workflows --only yaml/comment-block $INPUT_PATHS ${INPUT_EXCLUDE:+--exclude "$INPUT_EXCLUDE"}
