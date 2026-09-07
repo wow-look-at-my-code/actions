@@ -235,9 +235,11 @@ ts0 supplies the compiler, the bundler and `@types/node`, so an action's `packag
 ### [YAML Comment Block](yaml-comment-block/)
 
 ```yml
-# Fail CI when a GitHub Actions YAML file in the local call chain carries more than 1 comment line in a row.
+# Fail CI when a workflow or action manifest carries more than 1 comment line in a row. Run it after the checkout.
 - uses: wow-look-at-my/actions@yaml-comment-block#latest
 ```
+
+The rule lives in [slopfmt](https://github.com/wow-look-at-my/slopfmt). This action installs that binary and runs `slopfmt workflows`.
 
 ## Reusable Workflows
 

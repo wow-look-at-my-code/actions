@@ -4,20 +4,55 @@ description: Fail CI when a GitHub Actions YAML file in the local call chain car
 inputs:
   paths:
     description: >-
-      Files to scan, newline or comma separated, relative to the workspace.
-      Leave empty to scan every workflow file and every action.yml in the
-      workspace. Whatever the roots are, the scan follows `uses: ./...` from
-      them through the rest of the local call chain.
+      Paths to read, space separated. A directory is walked for every workflow
+      and every action manifest under it. Defaults to the whole workspace, so
+      the step must run after the checkout.
     required: false
-    default: ''
+    default: '.'
 
   exclude:
     description: >-
-      Glob patterns for files the scan skips, newline or comma separated.
-      Intended for fixtures that violate the rule on purpose.
+      Glob patterns for paths the walk skips, comma separated. Intended for a
+      fixture that breaks the rule on purpose.
     required: false
     default: ''
 
 runs:
-  using: node24
-  main: dist/index.js
+  using: composite
+  steps:
+    # The rule lives in slopfmt, which owns every prose and YAML rule the org applies. A second copy here would drift from it.
+    - name: Install slopfmt (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fsSL https://apt.pazer.build/slopfmt/install.sh | sudo sh
+        sudo apt-get install -y slopfmt
+
+    - name: Install slopfmt (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+        brew tap pazer/build https://brew.pazer.build/tap.git
+        brew trust pazer/build
+        brew install pazer/build/slopfmt
+
+    # A runner with no install path must say so here, because reaching the check step reports a missing command instead.
+    - name: Refuse a runner with no install path
+      if: runner.os != 'Linux' && runner.os != 'macOS'
+      shell: bash
+      run: |
+        echo "::error::yaml-comment-block installs slopfmt through APT or Homebrew, and ${RUNNER_OS} has neither. Run this check on a Linux or macOS runner."
+        exit 1
+
+    # slopfmt exits non-zero when the walk selects no file, so a step placed ahead of the checkout fails rather than passing on an empty workspace.
+    - name: Check comment blocks
+      shell: bash
+      env:
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        set -euo pipefail
+        # INPUT_PATHS is a list of paths, so it is deliberately unquoted.
+        slopfmt workflows --only yaml/comment-block $INPUT_PATHS ${INPUT_EXCLUDE:+--exclude "$INPUT_EXCLUDE"}

@@ -27,7 +27,7 @@ jobs:
         with:
           script: |
             const dirs = ['no-tests-in-yaml', 'no-scripts-action', 'tag-cleanup', 'no-all-builds-job',
-              'yaml-comment-block', 'ste-lint', 'cache-upload', 'cache-download', 'cache-cleanup', 'run-once',
+              'ste-lint', 'cache-upload', 'cache-download', 'cache-cleanup', 'run-once',
               'orphan-release'];
             await Promise.all(dirs.map(dir => $`just build`.cwd(dir)));
       # This job runs every common-check below from THIS checkout, so it claims the once-per-run slot: otherwise a downstream action pulls in the PUBLISHED copy and the repo cannot publish a fix for its own check.
@@ -41,7 +41,6 @@ jobs:
             orphan-release/dats/
             secret-server/dats/
             no-all-builds-job/dats/
-            yaml-comment-block/dats/
       - uses: ./no-tests-in-yaml
       # ste-lint/fixtures/* break the rules on purpose, hence .md.fixture and this glob.
       - uses: ./ste-lint
@@ -50,7 +49,10 @@ jobs:
       - uses: ./no-scripts-action
       - uses: ./tag-cleanup
       - uses: ./no-all-builds-job
+      # */test/fixtures/* break the rules on purpose, hence the exclude.
       - uses: ./yaml-comment-block
+        with:
+          exclude: '**/test/fixtures/**'
       # Dogfooded so its inline script is COMPILED here. An inline script is checked where it runs, so without this the only place it fails is a consumer's build.
       - uses: ./push-excludes-tags
       # Type-aware rules against boxed-String output streams.
