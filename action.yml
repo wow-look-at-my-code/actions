@@ -1,0 +1,42 @@
+name: Common Checks
+description: Run this org's GitHub Actions checks once per workflow run, over the calling repo only
+
+runs:
+  using: composite
+  steps:
+    # One job of the run holds the claim. see README.md
+    - id: claim
+      uses: wow-look-at-my/actions@run-once#latest
+      with:
+        name: common-checks
+
+    # Names the submodule paths the checks below leave alone. see README.md
+    - if: steps.claim.outputs.first == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if [ -f .gitmodules ]; then
+          git config --file .gitmodules --get-regexp '^submodule\..*\.path$' \
+            | jq -Rrn '
+                [inputs | capture("^\\S+ +(?<path>.+)$").path | sub("/+$"; "") + "/**"]
+                | select(length > 0)
+                | "common-checks: submodules of this repo carry their own CI, so these paths are excluded:", .[]
+              '
+        fi
+
+    - if: steps.claim.outputs.first == 'true'
+      uses: wow-look-at-my/actions@no-all-builds-job#latest
+
+    - if: steps.claim.outputs.first == 'true'
+      uses: wow-look-at-my/actions@yaml-comment-block#latest
+
+    - if: steps.claim.outputs.first == 'true'
+      uses: wow-look-at-my/actions@no-tests-in-yaml#latest
+
+    - if: steps.claim.outputs.first == 'true'
+      uses: wow-look-at-my/actions@push-excludes-tags#latest
+
+    # Every markdown file outside a submodule. There is no input to opt a path out.
+    - if: steps.claim.outputs.first == 'true'
+      uses: wow-look-at-my/actions@ste-lint#latest

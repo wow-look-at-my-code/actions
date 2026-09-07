@@ -1,0 +1,37 @@
+{
+	"description": "Every check common-checks runs, and the modules that carry each one's rules. Consumers that re-run these checks outside a workflow read this file so they cannot drift from the composite. Paths are repo-relative. A check with no modules states why nothing importable carries its rule.",
+	"checks": [
+		{
+			"name": "run-once",
+			"modules": [],
+			"reason": "it claims the workflow run for one job. There is no rule a file can break."
+		},
+		{
+			"name": "no-all-builds-job",
+			"modules": ["no-all-builds-job/src/detect.ts"]
+		},
+		{
+			"name": "yaml-comment-block",
+			"modules": [],
+			"reason": "its rule lives in wow-look-at-my/slopfix, which owns every prose and YAML rule the org applies and ships the action that runs them. This action is a name every repository already calls, forwarding to that one, so this repository carries nothing importable to drift from it."
+		},
+		{
+			"name": "no-tests-in-yaml",
+			"modules": ["no-tests-in-yaml/src/scan.ts"]
+		},
+		{
+			"name": "push-excludes-tags",
+			"modules": [],
+			"reason": "its rule is an inline script inside a composite action, which nothing can import. Converting it to a node action to expose one eight-line rule cost 642 lines against 34, 386 of them a lockfile, on an action every repository in the org runs."
+		},
+		{
+			"name": "ste-lint",
+			"modules": [
+				"ste-lint/src/lint.ts",
+				"ste-lint/src/blocks.ts",
+				"ste-lint/src/ste100-banned-words.ts",
+				"ste-lint/src/guard.ts"
+			]
+		}
+	]
+}
