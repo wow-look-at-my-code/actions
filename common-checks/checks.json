@@ -13,7 +13,7 @@
 		{
 			"name": "yaml-comment-block",
 			"modules": [],
-			"reason": "its rule lives in wow-look-at-my/slopfmt, which owns every prose and YAML rule the org applies. The action downloads that binary from buildhost and runs `slopfmt workflows`, so this repository carries nothing importable to drift from it."
+			"reason": "its rule lives in wow-look-at-my/slopfix, which owns every prose and YAML rule the org applies and ships the action that runs them. This action is a name every repository already calls, forwarding to that one, so this repository carries nothing importable to drift from it."
 		},
 		{
 			"name": "no-tests-in-yaml",

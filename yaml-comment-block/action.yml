@@ -20,21 +20,10 @@ inputs:
 runs:
   using: composite
   steps:
-    # The rule lives in slopfmt, which owns every prose and YAML rule the org applies. A second copy here would drift from it.
-    - name: Download slopfmt
-      id: slopfmt
-      uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
+    # Kept as a name every repository already calls, over the action in slopfix, which owns the rule and the download.
+    - uses: wow-look-at-my/slopfix@master
       with:
-        project: slopfmt
-
-    # slopfmt exits non-zero when the walk selects no file, so a step placed ahead of the checkout fails rather than passing on an empty workspace.
-    - name: Check comment blocks
-      shell: bash
-      env:
-        SLOPFMT: ${{ steps.slopfmt.outputs.path }}
-        INPUT_PATHS: ${{ inputs.paths }}
-        INPUT_EXCLUDE: ${{ inputs.exclude }}
-      run: |
-        set -euo pipefail
-        # INPUT_PATHS is a list of paths, so it is deliberately unquoted.
-        "$SLOPFMT" workflows --only yaml/comment-block $INPUT_PATHS ${INPUT_EXCLUDE:+--exclude "$INPUT_EXCLUDE"}
+        command: workflows
+        only: yaml/comment-block
+        paths: ${{ inputs.paths }}
+        exclude: ${{ inputs.exclude }}

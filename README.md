@@ -239,7 +239,7 @@ ts0 supplies the compiler, the bundler and `@types/node`, so an action's `packag
 - uses: wow-look-at-my/actions@yaml-comment-block#latest
 ```
 
-The rule lives in [slopfmt](https://github.com/wow-look-at-my/slopfmt). This action downloads that binary from buildhost and runs `slopfmt workflows`.
+A name every repository already calls, over the action in [slopfix](https://github.com/wow-look-at-my/slopfix), which owns the rule and the download.
 
 ## Reusable Workflows
 
