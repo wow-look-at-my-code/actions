@@ -49,10 +49,8 @@ jobs:
       - uses: ./no-scripts-action
       - uses: ./tag-cleanup
       - uses: ./no-all-builds-job
-      # */test/fixtures/* break the rules on purpose, hence the exclude.
+      # slopfix walks the tree itself now, so a fixture that breaks a rule on purpose carries a suffix the walk does not select.
       - uses: ./yaml-comment-block
-        with:
-          exclude: '**/test/fixtures/**'
       # Dogfooded so its inline script is COMPILED here. An inline script is checked where it runs, so without this the only place it fails is a consumer's build.
       - uses: ./push-excludes-tags
       # Type-aware rules against boxed-String output streams.

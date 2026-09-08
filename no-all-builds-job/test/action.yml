@@ -13,7 +13,10 @@ runs:
       id: shadowed
       continue-on-error: true
       shell: bash
-      run: NO_ALL_BUILDS_JOB_ALREADY_RAN= GITHUB_WORKSPACE="${GITHUB_WORKSPACE}/no-all-builds-job/test/fixtures/shadowed" INPUT_TOKEN= node no-all-builds-job/dist/index.js
+      run: |
+        w=$(mktemp -d); mkdir -p "$w/.github/workflows"
+        cp no-all-builds-job/test/fixtures/shadowed-ci.yml.fixture "$w/.github/workflows/ci.yml"
+        NO_ALL_BUILDS_JOB_ALREADY_RAN= GITHUB_WORKSPACE="$w" INPUT_TOKEN= node no-all-builds-job/dist/index.js
 
     - name: Assert the shadowed fixture failed the guard
       shell: bash
@@ -33,4 +36,7 @@ runs:
     # The sentinel skips the guard before any check runs.
     - name: Guard skips when the run-once sentinel is set
       shell: bash
-      run: NO_ALL_BUILDS_JOB_ALREADY_RAN=1 GITHUB_WORKSPACE="${GITHUB_WORKSPACE}/no-all-builds-job/test/fixtures/shadowed" INPUT_TOKEN=x node no-all-builds-job/dist/index.js
+      run: |
+        w=$(mktemp -d); mkdir -p "$w/.github/workflows"
+        cp no-all-builds-job/test/fixtures/shadowed-ci.yml.fixture "$w/.github/workflows/ci.yml"
+        NO_ALL_BUILDS_JOB_ALREADY_RAN=1 GITHUB_WORKSPACE="$w" INPUT_TOKEN=x node no-all-builds-job/dist/index.js
