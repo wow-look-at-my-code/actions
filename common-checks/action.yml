@@ -40,16 +40,3 @@ runs:
     # Every markdown file outside a submodule. There is no input to opt a path out.
     - if: steps.claim.outputs.first == 'true'
       uses: wow-look-at-my/actions@ste-lint#latest
-
-    # The binary is downloaded here because a node action cannot call one.
-    - if: steps.claim.outputs.first == 'true'
-      id: slopfix
-      uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
-      with:
-        project: slopfix
-
-    # The source this push touched, scoped to changed lines like ste-lint.
-    - if: steps.claim.outputs.first == 'true'
-      uses: wow-look-at-my/actions@comment-length#latest
-      with:
-        slopfix: ${{ steps.slopfix.outputs.path }}
