@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import {globSync} from 'node:fs';
 import {readFileSync} from 'node:fs';
-import {currentEvent, onTouchedLines, scopeOf} from './changed';
+import {currentEvent, onTouchedLines, scopeOf} from '../../_shared/changed/changed';
 import {guard} from './guard';
 import {capped, STE_MAX_WORDS} from './inputs';
 import {DEFAULTS, failureReport, hasFailures, lintFiles, type Options} from './lint';
@@ -76,7 +76,7 @@ function main(): void {
 	// The scope is the line this event changed, not the file it sits in. A
 	// sentence the change did not write is somebody else's finding, on somebody
 	// else's commit.
-	const scope = scopeOf(currentEvent());
+	const scope = scopeOf('ste-lint', currentEvent());
 	core.info(scope.note);
 	const names = scope.touched === null ? theirs : theirs.filter((name) => scope.touched?.has(name));
 	if (scope.touched !== null && names.length === 0) {

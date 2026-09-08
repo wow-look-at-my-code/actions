@@ -28,7 +28,7 @@ jobs:
           script: |
             const dirs = ['no-tests-in-yaml', 'no-scripts-action', 'tag-cleanup', 'no-all-builds-job',
               'ste-lint', 'cache-upload', 'cache-download', 'cache-cleanup', 'run-once',
-              'orphan-release'];
+              'orphan-release', 'comment-length'];
             await Promise.all(dirs.map(dir => $`just build`.cwd(dir)));
       # This job runs every common-check below from THIS checkout, so it claims the once-per-run slot: otherwise a downstream action pulls in the PUBLISHED copy and the repo cannot publish a fix for its own check.
       - uses: ./run-once
@@ -63,6 +63,10 @@ jobs:
       # No action.yml, so the release matrix never reaches it; it tests itself.
       - name: Shared cache-xfer unit tests
         working-directory: _shared/cache-xfer
+        run: ts0 test
+      # Two actions scope by it, so it is tested once here rather than in either.
+      - name: Shared changed-scope unit tests
+        working-directory: _shared/changed
         run: ts0 test
       - name: Create hand-off payload
         run: |

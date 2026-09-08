@@ -30,8 +30,17 @@
 				"ste-lint/src/lint.ts",
 				"ste-lint/src/blocks.ts",
 				"ste-lint/src/ste100-banned-words.ts",
-				"ste-lint/src/guard.ts"
+				"ste-lint/src/guard.ts",
+				"_shared/changed/changed.ts"
 			]
+		},
+		{
+			"name": "comment-length",
+			"modules": [
+				"comment-length/src/index.ts",
+				"_shared/changed/changed.ts"
+			],
+			"reason": "the rule and every parser live in wow-look-at-my/slopfix. What this action carries is which findings a push must answer for, which is the scoping it shares with ste-lint."
 		}
 	]
 }

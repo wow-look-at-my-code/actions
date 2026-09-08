@@ -1,0 +1,7 @@
+[private]
+help:
+	@just --list
+
+build:
+	pnpm install
+	ts0 build

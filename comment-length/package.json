@@ -1,0 +1,10 @@
+{
+  "name": "comment-length",
+  "version": "1.0.0",
+  "description": "Fail CI when a comment runs longer than the code it documents",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@actions/core": "^2.0.2"
+  }
+}

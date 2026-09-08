@@ -105,7 +105,7 @@ test('a branch base is fetched and read back as FETCH_HEAD', () => {
 });
 
 test('a push that changed nothing scopes to nothing, which is not the same as unknown', () => {
-	const scope = scopeOf({name: 'push', payload: {before: 'def456'}}, () => '');
+	const scope = scopeOf('t', {name: 'push', payload: {before: 'def456'}}, () => '');
 	assert.equal(scope.touched?.size, 0);
 });
 
@@ -113,13 +113,13 @@ test('a git failure widens the scope rather than narrowing it', () => {
 	const git = (): string => {
 		throw new Error('fatal: bad object');
 	};
-	const scope = scopeOf({name: 'push', payload: {before: 'def456'}}, git);
+	const scope = scopeOf('t', {name: 'push', payload: {before: 'def456'}}, git);
 	assert.equal(scope.touched, null);
 	assert.match(scope.note, /whole tree/);
 });
 
 test('an event with no base widens the scope too', () => {
-	const scope = scopeOf({name: 'schedule', payload: {}}, () => '');
+	const scope = scopeOf('t', {name: 'schedule', payload: {}}, () => '');
 	assert.equal(scope.touched, null);
 	assert.match(scope.note, /whole tree/);
 });

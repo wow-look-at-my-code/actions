@@ -1,14 +1,4 @@
-// This action lints what a push changed, not what the repository contains.
-//
-// A whole-tree lint asks a repository to answer for prose it did not write in
-// this change, and for prose it may not have written at all. A fork carries its
-// upstream's documentation. An imported tree carries somebody else's. Neither
-// belongs to the person whose commit turned the check red, and a check that
-// nobody can turn green is a check people route around.
-//
-// So the scope is the diff. A file this push did not touch is out of scope even
-// when it has findings, and the same file comes into scope the moment somebody
-// edits it. The rule that reaches the author is the rule the author can obey.
+// Scopes a check to the diff: a check nobody can turn green gets routed around.
 
 import {execFileSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
@@ -28,7 +18,7 @@ export type Scope = {
 	note: string;
 };
 
-type Git = (args: string[]) => string;
+export type Git = (args: string[]) => string;
 
 function field(value: unknown, ...path: string[]): string | null {
 	let node: unknown = value;
@@ -39,16 +29,14 @@ function field(value: unknown, ...path: string[]): string | null {
 	return typeof node === 'string' && node !== '' ? node : null;
 }
 
-// A commit of all zeros is git's way of saying "there was nothing here before":
-// the first push of a branch, or a branch that was just created.
+// All zeros is git for "there was nothing here before".
 function real(sha: string | null): string | null {
 	return sha !== null && !/^0+$/.test(sha) ? sha : null;
 }
 
 // Names the commit this event's diff starts from. A pull request measures
-// against the branch it merges into. A push measures against the branch tip it
-// replaced, and a brand new branch has no such tip, so it measures against the
-// default branch instead.
+// against the branch it merges into, a push against the tip it replaced, and a
+// brand new branch against the default branch.
 export function baseOf(event: Event): string | null {
 	const {name, payload} = event;
 	if (name === 'pull_request' || name === 'pull_request_target') {
@@ -60,16 +48,8 @@ export function baseOf(event: Event): string | null {
 	return branch === null ? null : `refs/heads/${branch}`;
 }
 
-// Lists the lines between the base and HEAD, by file.
-//
-// The unit is a line, not a file. A change that edits one sentence of a long
-// document answers for that sentence. It does not inherit every finding the
-// document already carried, which is what turns a check into a wall.
-//
-// `git diff` compares two trees and never needs a common ancestor, so a
-// depth-1 checkout works once the base commit itself is present. That is what
-// the fetch is for: actions/checkout takes one commit by default, and the base
-// is not it.
+// Lists the lines between the base and HEAD, by file. The fetch is for the
+// depth-1 checkout, which does not carry the base commit.
 export function changedLines(base: string, git: Git = runGit): Touched {
 	let rev = base;
 	if (base.startsWith('refs/')) {
@@ -89,8 +69,8 @@ const FILE_RE = /^\+\+\+ (?:b\/)?(.+)$/;
 // @@ -old,count +new,count @@ -- the "+" side names the lines that now exist.
 const HUNK_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
-// Reads a unified diff into the set of lines each file now has that it did not
-// have before. A deletion adds no line, so it contributes nothing.
+// Reads a unified diff into the lines each file now has and did not before. A
+// deletion adds no line, so it contributes nothing.
 export function parseHunks(diff: string): Touched {
 	const touched: Touched = new Map();
 	let file = '';
@@ -114,41 +94,43 @@ export function parseHunks(diff: string): Touched {
 	return touched;
 }
 
-// Resolves the scope for this run. A failure here returns a null scope, and the
-// caller then lints everything and says so: this decides what to SKIP, and a
-// check that skips on an error is a check that passes for the wrong reason.
-export function scopeOf(event: Event, git: Git = runGit): Scope {
+// Resolves the scope for this run. This decides what to SKIP, so a failure
+// widens the scope rather than narrowing it: skipping on an error is a check
+// that passes for the wrong reason.
+export function scopeOf(tool: string, event: Event, git: Git = runGit): Scope {
 	const base = baseOf(event);
 	if (base === null) {
-		return {touched: null, note: `ste-lint: the ${event.name} event names no base commit, so this run reads the whole tree`};
+		return {touched: null, note: `${tool}: the ${event.name} event names no base commit, so this run reads the whole tree`};
 	}
 	try {
 		const touched = changedLines(base, git);
 		const lines = [...touched.values()].reduce((n, set) => n + set.size, 0);
-		return {touched, note: `ste-lint: scoped to ${lines} line(s) across ${touched.size} file(s) changed since ${base}`};
+		return {touched, note: `${tool}: scoped to ${lines} line(s) across ${touched.size} file(s) changed since ${base}`};
 	} catch (err) {
 		const why = err instanceof Error ? err.message : String(err);
-		return {touched: null, note: `ste-lint: could not diff against ${base} (${why}), so this run reads the whole tree`};
+		return {touched: null, note: `${tool}: could not diff against ${base} (${why}), so this run reads the whole tree`};
 	}
 }
 
-// Keeps the findings that sit on a changed line. A finding is reported as
-// "path:line: ...", which is the line the writer must go and fix.
+// Whether one finding's own line was changed.
+export function touchedAt(touched: Touched, path: string, line: number): boolean {
+	return touched.get(path)?.has(line) ?? false;
+}
+
+// Keeps the findings on a changed line, from "path:line: ..." text.
 export function onTouchedLines<T extends object>(findings: T, touched: Touched): T {
 	const out: Record<string, string[]> = {};
 	for (const [rule, list] of Object.entries(findings) as [string, string[]][]) {
 		out[rule] = list.filter((finding) => {
 			const m = /^(.*?):(\d+):/.exec(finding);
 			if (m === null) return true;
-			return touched.get(m[1])?.has(Number(m[2])) ?? false;
+			return touchedAt(touched, m[1], Number(m[2]));
 		});
 	}
 	return out as T;
 }
 
-// Reads the event this run was started by. An unreadable payload is not an
-// error: it leaves the base unknown, which widens the scope rather than
-// narrowing it.
+// An unreadable payload leaves the base unknown, which widens the scope.
 export function currentEvent(): Event {
 	const name = process.env.GITHUB_EVENT_NAME ?? '';
 	const path = process.env.GITHUB_EVENT_PATH;
