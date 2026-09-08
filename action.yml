@@ -1,0 +1,13 @@
+name: no-all-builds-job
+version: 2
+description: Fail CI when any job is named all-builds — a known trick that shadows the org's required all-builds gate (required-builds-manager) in the GitHub UI
+
+inputs:
+  token:
+    description: 'GitHub token. With actions: read it also scans this run''s jobs, and with checks: read the head commit''s check runs; the workflow-file scan runs regardless of token permissions.'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: node24
+  main: dist/index.js
