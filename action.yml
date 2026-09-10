@@ -1,0 +1,56 @@
+name: TypeScript
+version: 4
+description: Run an inline TypeScript script, validated with tsc, with helpful globals pre-injected.
+
+inputs:
+  script:
+    description: TypeScript source to execute. Top-level `import`/`export`, `await`, and `return <value>` all work, with helpers like `core`, `context`, `octokit`, `fs`, `path` already in scope. `require('yaml')` resolves to the bundled parser, so a script reads YAML without a `yq` on PATH. Two or more consecutive `//`-only lines fail the step (inline scripts only). Mutually exclusive with `file`.
+    required: false
+    default: ''
+  file:
+    description: Path to a .ts file to execute (resolved relative to $GITHUB_WORKSPACE). The file contents are treated like an inline `script`. Mutually exclusive with `script`.
+    required: false
+    default: ''
+  dom:
+    description: Type-check with the DOM library as well as ES2022. Off by default, because lib.dom declares browser globals with short names -- name, status, location, length, close, open, event -- and an undeclared identifier in a Node script silently becomes one of those instead of an error. Turn it on for a script that carries browser-side code, such as a Playwright evaluate or $eval callback.
+    required: false
+    default: 'false'
+
+  github-token:
+    description: Token used to authenticate the injected `octokit` instance (and the default token for `getOctokit()`). Defaults to the automatic GITHUB_TOKEN (the github.token expression). Override with a PAT for broader scope. The caller must still grant the matching `permissions:` for the token to be allowed to act.
+    required: false
+    default: ${{ github.token }}
+
+  # The runner never hands these to an action process. Pass `vars: ${{ toJSON(vars) }}`.
+  vars:
+    description: 'vars workflow context as JSON. Callers must pass toJSON(vars) wrapped in an expression.'
+    required: false
+    default: '{}'
+  secrets:
+    description: 'secrets workflow context as JSON. Callers must pass toJSON(secrets) wrapped in an expression.'
+    required: false
+    default: '{}'
+  steps:
+    description: 'steps workflow context as JSON. Callers must pass toJSON(steps) wrapped in an expression.'
+    required: false
+    default: '{}'
+  needs:
+    description: 'needs workflow context as JSON. Callers must pass toJSON(needs) wrapped in an expression.'
+    required: false
+    default: '{}'
+  strategy:
+    description: 'strategy workflow context as JSON.'
+    required: false
+    default: '{}'
+  matrix:
+    description: 'matrix workflow context as JSON. Callers must pass toJSON(matrix) wrapped in an expression.'
+    required: false
+    default: '{}'
+
+outputs:
+  result:
+    description: JSON-encoded value returned by the script (if any).
+
+runs:
+  using: node24
+  main: dist/index.js

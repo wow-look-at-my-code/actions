@@ -1,0 +1,66 @@
+name: Test typescript
+version: 1
+description: "Dogfood the typescript action via file: inputs exercising import/export/return/await/fetch hoisting (never released)"
+
+runs:
+  using: composite
+  steps:
+    # Type-aware rules against boxed-String output streams.
+    - name: Lint
+      working-directory: typescript
+      shell: bash
+      run: just lint
+
+    # repro.ts: top-level import, injected globals, top-level await, global fetch.
+    - name: "repro.ts: import + globals + await + fetch"
+      uses: ./typescript
+      with:
+        file: typescript/test/repro.ts
+
+    # The seeded version must differ from repro2.ts's own exported VERSION.
+    - name: Seed package.json for repro2 (readFile("package.json"))
+      shell: bash
+      run: echo '{"version":"9.9.9-test"}' > "${GITHUB_WORKSPACE}/package.json"
+
+    - name: "repro2.ts: export + import + top-level return"
+      id: repro2
+      uses: ./typescript
+      with:
+        file: typescript/test/repro2.ts
+
+    - name: Assert the top-level return reached the result output
+      shell: bash
+      env:
+        RESULT: ${{ steps.repro2.outputs.result }}
+      run: |
+        set -euo pipefail
+        echo "repro2 result output: ${RESULT}"
+        if [ "${RESULT}" != '"9.9.9-test"' ]; then
+          echo "::error::expected result '\"9.9.9-test\"' (the returned pkg.version), got '${RESULT}'"
+          exit 1
+        fi
+        echo "repro2 OK: top-level return value reached the result output"
+
+    # repro3.ts: the injected octokit must authenticate with no plumbing at all.
+    - name: "repro3.ts: injected octokit authenticated with the default token"
+      uses: ./typescript
+      with:
+        file: typescript/test/repro3.ts
+
+    - name: Intentionally failing step (continue-on-error, for the outcome-gate test below)
+      id: outcome-gate-check
+      continue-on-error: true
+      shell: bash
+      run: exit 1
+
+    # outcome, not conclusion -- continue-on-error masks conclusion to "success"
+    - name: "outcome-gate: fails when the checked step's outcome isn't success"
+      id: outcome-gate
+      if: steps.outcome-gate-check.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: exit 1
+
+    - name: Assert the outcome-gate step correctly failed
+      shell: bash
+      run: test "${{ steps.outcome-gate.outcome }}" = "failure"
