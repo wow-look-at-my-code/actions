@@ -114,7 +114,7 @@ ts0 supplies the compiler, the bundler and `@types/node`, so an action's `packag
 ### [GHCR](ghcr/)
 
 ```yml
-# Build, push, and prune container images on GHCR..
+# Build, push, and prune container images on GHCR. Every build carries the OCI source and revision labels..
 - uses: wow-look-at-my/actions@ghcr#latest
 ```
 
@@ -235,11 +235,9 @@ ts0 supplies the compiler, the bundler and `@types/node`, so an action's `packag
 ### [YAML Comment Block](yaml-comment-block/)
 
 ```yml
-# Fail CI when a workflow or action manifest carries more than 1 comment line in a row. Run it after the checkout.
+# Fail CI when a GitHub Actions YAML file carries more than 1 comment line in a row.
 - uses: wow-look-at-my/actions@yaml-comment-block#latest
 ```
-
-A name every repository already calls, over the action in [slopfix](https://github.com/wow-look-at-my/slopfix), which owns the rule and the download.
 
 ## Reusable Workflows
 
