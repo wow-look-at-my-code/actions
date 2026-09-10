@@ -61,7 +61,8 @@ import {internalCacheTwirpClient} from '@actions/cache/lib/internal/shared/cache
 import {ambiguityMessage, distinctHandoffNames} from './discovery';
 import {handoffKey, handoffRestorePrefix, handoffVersion, legacyHandoffKey, legacyHandoffRestorePrefix, legacyHandoffVersion, nameFromKey, runRestorePrefix, validateName} from '../../_shared/cache-xfer/lib';
 import {MissOutcome, missOutcome, namelessMissOutcome} from './miss';
-import {inputLines, planDownloads} from './plan';
+import {RestoreEntry, restoreEntries} from '../../_shared/cache-xfer/handoffs';
+import {parse as parseYaml} from 'yaml';
 import {unpackFromFile} from '../../_shared/cache-xfer/xfer';
 
 function requireEnv(name: string): string {
@@ -202,18 +203,24 @@ async function run(): Promise<void> {
 		throw new Error(`cache-download requires the v2 cache service (github.com); this runner reports '${serviceVersion}'. GHES is not supported.`);
 	}
 
-	const names = inputLines(core.getInput('name'));
-	const paths = inputLines(core.getInput('path'));
+	const nameInput = core.getInput('name');
+	const pathInput = core.getInput('path');
+	const restoreInput = core.getInput('restore');
 	const failIfMissing = core.getBooleanInput('fail-if-missing');
-	for (const name of names) {
-		validateName(name);
+	if (restoreInput && (nameInput || pathInput)) {
+		throw new Error("'restore' is the whole list of hand-offs; do not give 'name' or 'path' with it");
+	}
+	// `restore` is a mapping of hand-off name to destination; `name` alone is
+	// one hand-off into `path`; neither is nameless discovery into `path`.
+	const plans: RestoreEntry[] = restoreInput ? restoreEntries(parseYaml(restoreInput)) : nameInput ? [{name: nameInput, destination: pathInput || '.'}] : [];
+	for (const plan of plans) {
+		validateName(plan.name);
 	}
 
 	// Artifact parity: the destination is a real directory of the consumer's
 	// choosing, defaulting to the workspace. Nothing about it needs to match
 	// what the producer passed to cache-upload.
 	const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-	const plans = planDownloads(names, paths);
 	const resolveDest = (p: string): string => path.resolve(workspace, expandTilde(p));
 
 	const runId = requireEnv('GITHUB_RUN_ID');
@@ -226,7 +233,7 @@ async function run(): Promise<void> {
 		if (resolved === 'ambiguous') {
 			return;
 		}
-		const one = await restoreOne(resolved, resolveDest(paths[0] ?? '.'), runId, runAttempt);
+		const one = await restoreOne(resolved, resolveDest(pathInput || '.'), runId, runAttempt);
 		if (one === 'missing') {
 			return;
 		}

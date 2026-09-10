@@ -93,11 +93,11 @@ jobs:
           test "${{ steps.named.outputs.cache-hit }}" = "true"
           test "${{ steps.named.outputs.name }}" = "dogfood-a"
           diff handoff-src/hello.txt restore-named/hello.txt
-      - name: Upload a second hand-off (dogfood-b)
+      - name: Upload a second hand-off (dogfood-b), through the save mapping
         uses: ./cache-upload
         with:
-          name: dogfood-b
-          path: handoff-src/hello.txt
+          save: |
+            dogfood-b: handoff-src/hello.txt
       # The REST list lags the twirp finalize, so wait for both entries.
       - name: Wait for both hand-offs to be listable
         env:
@@ -113,14 +113,13 @@ jobs:
           done
           echo "::error::cache list never showed both hand-offs"
           exit 1
-      - name: One step restores both hand-offs under one root
+      - name: One step restores both hand-offs
         id: both
         uses: ./cache-download
         with:
-          name: |
-            dogfood-a
-            dogfood-b
-          path: restore-both
+          restore: |
+            dogfood-a: restore-both/dogfood-a
+            dogfood-b: restore-both/dogfood-b
       - name: Assert both landed in their own directories, in order
         env:
           NAMES: ${{ steps.both.outputs.name }}

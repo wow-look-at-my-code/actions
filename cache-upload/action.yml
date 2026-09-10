@@ -3,19 +3,26 @@ version: 1
 description: Hand a file or directory to later jobs in the same workflow run via the actions cache (artifact-free replacement for actions/upload-artifact)
 
 inputs:
+  save:
+    description: >-
+      YAML mapping of hand-off name to what it carries: one path (a file, or
+      a directory captured as its contents), or several paths as a list or
+      one per line, kept under their paths relative to the workspace. Every
+      hand-off is saved in this one step. Give this, or name and path.
+    required: false
+    default: ''
   name:
     description: 'Hand-off name, unique within the workflow run (like an artifact name)'
-    required: true
+    required: false
+    default: ''
   path:
-    description: >-
-      File or directory to hand off (a directory is captured as its
-      contents), or several paths, one per line, kept under their paths
-      relative to the workspace.
-    required: true
+    description: 'What the one hand-off named by `name` carries; the same forms as a `save` value'
+    required: false
+    default: ''
 
 outputs:
   key:
-    description: 'Cache key the hand-off was saved under'
+    description: 'Cache key each hand-off was saved under, one per line in input order'
 
 runs:
   using: node24

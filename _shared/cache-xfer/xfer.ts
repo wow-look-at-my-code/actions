@@ -120,7 +120,7 @@ async function tarInvocation(): Promise<{cmd: string; extraArgs: string[]; fixPa
  * by tar). Nothing is ever buffered whole in JS — header write aside, both
  * paths are pure child-process streaming.
  */
-export async function packToFile(sourcePath: string, archivePath: string, name: string): Promise<EnvelopeHeader> {
+export async function packToFile(sourcePath: string, archivePath: string, name: string, producer: string = process.platform): Promise<EnvelopeHeader> {
 	let stats: fs.Stats;
 	try {
 		stats = await fsp.stat(sourcePath);
@@ -135,10 +135,11 @@ export async function packToFile(sourcePath: string, archivePath: string, name: 
 			codec: 'zstd',
 			name,
 			basename: path.basename(path.resolve(sourcePath)),
-			fileMode: stats.mode & 0o7777
+			fileMode: stats.mode & 0o7777,
+			producer
 		};
 	} else if (stats.isDirectory()) {
-		header = {mode: 'tar', codec: 'zstd', name};
+		header = {mode: 'tar', codec: 'zstd', name, producer};
 	} else {
 		throw new Error(`path '${sourcePath}' is neither a regular file nor a directory`);
 	}
@@ -173,7 +174,7 @@ export async function packToFile(sourcePath: string, archivePath: string, name: 
  * packToFile, for a hand-off that is a few things out of a tree rather than
  * one file or one directory.
  */
-export async function packEntriesToFile(base: string, entries: string[], archivePath: string, name: string): Promise<EnvelopeHeader> {
+export async function packEntriesToFile(base: string, entries: string[], archivePath: string, name: string, producer: string = process.platform): Promise<EnvelopeHeader> {
 	if (entries.length === 0) {
 		throw new Error('no paths to hand off');
 	}
@@ -187,7 +188,7 @@ export async function packEntriesToFile(base: string, entries: string[], archive
 			throw new Error(`path '${path.join(base, entry)}' does not exist; nothing to hand off`);
 		}
 	}
-	const header: EnvelopeHeader = {mode: 'tar', codec: 'zstd', name};
+	const header: EnvelopeHeader = {mode: 'tar', codec: 'zstd', name, producer};
 	const out = fs.createWriteStream(archivePath);
 	out.write(encodeEnvelope(header));
 	const zstd = spawn('zstd', ZSTD_COMPRESS_ARGS, {stdio: ['pipe', 'pipe', 'pipe']});
@@ -242,5 +243,26 @@ export async function unpackFromFile(archivePath: string, destDir: string): Prom
 		stages.push(pipeIntoStdin(zstd.stdout, tar.stdin), waitExit(tar, 'tar', tarErr));
 		await awaitStages(stages);
 	}
+	if (header.producer === 'win32' && process.platform !== 'win32') {
+		await markExecutable(destDir);
+	}
 	return header;
+}
+
+/**
+ * A win32 producer has no exec bit to record, so its archive restores every
+ * file as plain data on unix. The files a Windows leg hands over are the
+ * binaries it built, so every regular file gets the exec bits its read bits
+ * allow.
+ */
+async function markExecutable(dir: string): Promise<void> {
+	for (const entry of await fsp.readdir(dir, {withFileTypes: true})) {
+		const p = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			await markExecutable(p);
+		} else if (entry.isFile()) {
+			const mode = (await fsp.stat(p)).mode & 0o7777;
+			await fsp.chmod(p, mode | ((mode & 0o444) >> 2));
+		}
+	}
 }

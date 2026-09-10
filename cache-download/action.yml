@@ -3,24 +3,26 @@ version: 1
 description: Restore files handed off by cache-upload earlier in the same workflow run (artifact-free replacement for actions/download-artifact)
 
 inputs:
+  restore:
+    description: >-
+      YAML mapping of hand-off name to the directory it is restored into.
+      Every hand-off is restored in this one step. Give this, or name and
+      path.
+    required: false
+    default: ''
   name:
     description: >-
-      Hand-off name used by the matching cache-upload step, or several, one
-      per line, restored in one step. Optional: when omitted, the single
-      hand-off of this run is discovered automatically (run-scoped key
-      prefix). If this run saved MORE THAN ONE hand-off the nameless mode
-      hard-fails naming the candidates when it can list them (needs
-      github-token with actions: read), and otherwise restores the newest
-      entry with a warning — runs with multiple hand-offs should keep
+      Hand-off name used by the matching cache-upload step. Optional: when
+      omitted, the single hand-off of this run is discovered automatically
+      (run-scoped key prefix). If this run saved MORE THAN ONE hand-off the
+      nameless mode hard-fails naming the candidates when it can list them
+      (needs github-token with actions: read), and otherwise restores the
+      newest entry with a warning — runs with multiple hand-offs should keep
       passing an explicit name.
     required: false
     default: ''
   path:
-    description: >-
-      Destination directory to restore into (defaults to the workspace).
-      With several names, one path puts each hand-off in its own
-      <path>/<name> directory, and one path per line pairs with the names
-      in order.
+    description: 'Destination directory to restore into (defaults to the workspace)'
     required: false
     default: ''
   fail-if-missing:

@@ -175,3 +175,31 @@ test('several entries round-trip under their relative paths', async t => {
 	await assert.rejects(packEntriesToFile(base, ['../etc'], archive, 'escape'), /inside it/);
 	await assert.rejects(packEntriesToFile(base, ['missing'], archive, 'missing'), /does not exist/);
 });
+
+test('a win32-origin archive restores every file executable on unix', {skip: process.platform === 'win32'}, async t => {
+	const base = await tempDir();
+	t.after(() => fsp.rm(base, {recursive: true, force: true}));
+	await fsp.mkdir(path.join(base, 'out', 'sub'), {recursive: true});
+	await fsp.writeFile(path.join(base, 'out', 'fizzbuzz.com'), 'MZ', {mode: 0o644});
+	await fsp.writeFile(path.join(base, 'out', 'sub', 'probe.com'), 'MZ', {mode: 0o600});
+	const archive = path.join(base, 'handoff.wxfr');
+
+	const packed = await packToFile(path.join(base, 'out'), archive, 'ape-binary-Windows', 'win32');
+	assert.equal(packed.producer, 'win32');
+	const dest = path.join(base, 'dest');
+	await unpackFromFile(archive, dest);
+	assert.equal((await fsp.stat(path.join(dest, 'fizzbuzz.com'))).mode & 0o777, 0o755);
+	assert.equal((await fsp.stat(path.join(dest, 'sub', 'probe.com'))).mode & 0o777, 0o700);
+
+	const raw = path.join(base, 'raw.wxfr');
+	await packToFile(path.join(base, 'out', 'fizzbuzz.com'), raw, 'one', 'win32');
+	const rawDest = path.join(base, 'raw-dest');
+	await unpackFromFile(raw, rawDest);
+	assert.equal((await fsp.stat(path.join(rawDest, 'fizzbuzz.com'))).mode & 0o111, 0o111);
+
+	const unix = path.join(base, 'unix.wxfr');
+	await packToFile(path.join(base, 'out'), unix, 'ape-binary-Linux', 'linux');
+	const unixDest = path.join(base, 'unix-dest');
+	await unpackFromFile(unix, unixDest);
+	assert.equal((await fsp.stat(path.join(unixDest, 'fizzbuzz.com'))).mode & 0o111, 0, 'a unix producer keeps its own modes');
+});

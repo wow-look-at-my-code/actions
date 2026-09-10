@@ -46,6 +46,8 @@ import {getCacheServiceVersion} from '@actions/cache/lib/internal/config';
 import {internalCacheTwirpClient} from '@actions/cache/lib/internal/shared/cacheTwirpClient';
 import {handoffKey, handoffVersion, validateName} from '../../_shared/cache-xfer/lib';
 import {packEntriesToFile, packToFile} from '../../_shared/cache-xfer/xfer';
+import {SaveEntry, saveEntries} from '../../_shared/cache-xfer/handoffs';
+import {parse as parseYaml} from 'yaml';
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -65,34 +67,23 @@ function expandTilde(p: string): string {
 	return p;
 }
 
-async function run(): Promise<void> {
-	const serviceVersion = getCacheServiceVersion();
-	if (serviceVersion !== 'v2') {
-		throw new Error(`cache-upload requires the v2 cache service (github.com); this runner reports '${serviceVersion}'. GHES is not supported.`);
-	}
-
-	const name = core.getInput('name', {required: true});
-	const pathInput = core.getInput('path', {required: true});
-	const pathLines = pathInput.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-	validateName(name);
-
-	const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-	const source = path.resolve(workspace, expandTilde(pathLines[0] ?? pathInput));
-	// Several lines name several things out of the workspace tree; the archive keeps their relative paths.
-	const entries = pathLines.length > 1 ? pathLines.map(p => path.relative(workspace, path.resolve(workspace, expandTilde(p)))) : undefined;
-
-	const key = handoffKey(name, requireEnv('GITHUB_RUN_ID'), process.env.GITHUB_RUN_ATTEMPT || '1');
+/** Pack one hand-off and save it under this run's key for it. Returns the key. */
+async function saveOne(twirpClient: ReturnType<typeof internalCacheTwirpClient>, workspace: string, entry: SaveEntry): Promise<string> {
+	validateName(entry.name);
+	const key = handoffKey(entry.name, requireEnv('GITHUB_RUN_ID'), process.env.GITHUB_RUN_ATTEMPT || '1');
 	const version = handoffVersion();
+	// One path is a file or a directory as it stands; several keep their paths relative to the workspace.
+	const source = path.resolve(workspace, expandTilde(entry.paths[0]));
+	const entries = entry.paths.length > 1 ? entry.paths.map(p => path.relative(workspace, path.resolve(workspace, expandTilde(p)))) : undefined;
 
 	const tempDir = await fsp.mkdtemp(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cache-xfer-'));
 	const archivePath = path.join(tempDir, 'handoff.wxfr');
 	try {
-		const header = entries ? await packEntriesToFile(workspace, entries, archivePath, name) : await packToFile(source, archivePath, name);
+		const header = entries ? await packEntriesToFile(workspace, entries, archivePath, entry.name) : await packToFile(source, archivePath, entry.name);
 		const archiveSize = (await fsp.stat(archivePath)).size;
 		core.info(`Packed '${entries ? entries.join(' ') : source}' (${header.mode}) into ${archiveSize} byte archive`);
 
-		const twirpClient = internalCacheTwirpClient();
-		core.info(`Saving hand-off '${name}' with key ${key}`);
+		core.info(`Saving hand-off '${entry.name}' with key ${key}`);
 		const reservation = await twirpClient.CreateCacheEntry({key, version});
 		if (!reservation.ok) {
 			// A same-(name,attempt) collision or a read-only cache policy both
@@ -111,11 +102,43 @@ async function run(): Promise<void> {
 		if (!finalized.ok) {
 			throw new Error(`Unable to finalize cache entry for key ${key}${finalized.message ? `: ${finalized.message}` : ''}`);
 		}
-		core.info(`Hand-off '${name}' saved (entry ${finalized.entryId}, ${Math.round(archiveSize / (1024 * 1024))} MB)`);
-		core.setOutput('key', key);
+		core.info(`Hand-off '${entry.name}' saved (entry ${finalized.entryId}, ${Math.round(archiveSize / (1024 * 1024))} MB)`);
 	} finally {
 		await fsp.rm(tempDir, {recursive: true, force: true});
 	}
+	return key;
+}
+
+async function run(): Promise<void> {
+	const serviceVersion = getCacheServiceVersion();
+	if (serviceVersion !== 'v2') {
+		throw new Error(`cache-upload requires the v2 cache service (github.com); this runner reports '${serviceVersion}'. GHES is not supported.`);
+	}
+
+	const nameInput = core.getInput('name');
+	const pathInput = core.getInput('path');
+	const saveInput = core.getInput('save');
+	if (saveInput && (nameInput || pathInput)) {
+		throw new Error("'save' is the whole list of hand-offs; do not give 'name' or 'path' with it");
+	}
+	// `save` is a mapping of hand-off name to path or paths; `name` and `path` are one hand-off.
+	let entries: SaveEntry[];
+	if (saveInput) {
+		entries = saveEntries(parseYaml(saveInput));
+	} else {
+		if (!nameInput || !pathInput) {
+			throw new Error("give 'save' (a mapping of hand-off name to path), or both 'name' and 'path'");
+		}
+		entries = saveEntries({[nameInput]: pathInput});
+	}
+
+	const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
+	const twirpClient = internalCacheTwirpClient();
+	const keys: string[] = [];
+	for (const entry of entries) {
+		keys.push(await saveOne(twirpClient, workspace, entry));
+	}
+	core.setOutput('key', keys.join('\n'));
 }
 
 run().catch((error: unknown) => {

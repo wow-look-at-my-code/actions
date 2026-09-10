@@ -61,9 +61,6 @@ ts0 supplies the compiler, the bundler and `@types/node`, so an action's `packag
 ```yml
 # Hand a file or directory to later jobs in the same workflow run via the actions cache (artifact-free replacement for actions/upload-artifact).
 - uses: wow-look-at-my/actions@cache-upload#latest
-  with:
-    name: # Hand-off name, unique within the workflow run (like an artifact name)
-    path: # File or directory to hand off (a directory is captured as its contents), or several paths, one per line, kept under their paths relative to the workspace.
 ```
 
 ### [Cloudflare Pages](cloudflare-pages/)
