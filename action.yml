@@ -1,0 +1,46 @@
+name: Cache Download
+version: 1
+description: Restore files handed off by cache-upload earlier in the same workflow run (artifact-free replacement for actions/download-artifact)
+
+inputs:
+  name:
+    description: >-
+      Hand-off name used by the matching cache-upload step. Optional: when
+      omitted, the single hand-off of this run is discovered automatically
+      (run-scoped key prefix). If this run saved MORE THAN ONE hand-off the
+      nameless mode hard-fails naming the candidates when it can list them
+      (needs github-token with actions: read), and otherwise restores the
+      newest entry with a warning — runs with multiple hand-offs should keep
+      passing an explicit name.
+    required: false
+    default: ''
+  path:
+    description: 'Destination directory to restore into (defaults to the workspace)'
+    required: false
+    default: ''
+  fail-if-missing:
+    description: 'Fail the job if the hand-off is not found (only an explicit false lets a miss continue)'
+    required: false
+    default: 'true'
+  github-token:
+    description: >-
+      Token used ONLY by the nameless mode to list this run's hand-offs for
+      the ambiguity check (documented REST cache list; needs actions: read).
+      Named downloads never use it; if it cannot list, discovery proceeds
+      with a warning.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  download-path:
+    description: 'Absolute path of the directory the files were restored into'
+  cache-hit:
+    description: 'true on an exact key match (same run attempt); false when restored from an earlier attempt'
+  cache-matched-key:
+    description: 'Cache key actually restored (empty on a miss)'
+  name:
+    description: 'Hand-off name actually restored (the input name, or the discovered one in nameless mode; empty on a miss)'
+
+runs:
+  using: node24
+  main: dist/index.js
