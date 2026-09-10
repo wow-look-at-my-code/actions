@@ -1,0 +1,9 @@
+name: Test push-excludes-tags
+version: 1
+description: Dogfood push-excludes-tags so its inline script is compiled here (never released)
+
+runs:
+  using: composite
+  steps:
+    # An inline script is checked where it runs, so without this the only place it fails is a consumer's build.
+    - uses: ./push-excludes-tags

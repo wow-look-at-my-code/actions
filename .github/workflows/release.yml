@@ -34,100 +34,18 @@ jobs:
       - uses: ./run-once
         with:
           name: common-checks
-      # The guard suites drive dist/, so they run after the build above.
-      - uses: wow-look-at-my/dats@master
-        with:
-          tests: |
-            orphan-release/dats/
-            secret-server/dats/
-            no-all-builds-job/dats/
-      - uses: ./no-tests-in-yaml
-      # ste-lint/fixtures/* break the rules on purpose, hence .md.fixture and this glob.
-      - uses: ./ste-lint
-        with:
-          files: '*.md docs/*.md .github/workflows/*.md */README.md */CLAUDE.md'
-      - uses: ./no-scripts-action
-      - uses: ./tag-cleanup
-      - uses: ./no-all-builds-job
-      # slopfix walks the tree itself now, so a fixture that breaks a rule on purpose carries a suffix the walk does not select.
-      - uses: ./yaml-comment-block
-      # Dogfooded so its inline script is COMPILED here. An inline script is checked where it runs, so without this the only place it fails is a consumer's build.
-      - uses: ./push-excludes-tags
-      # Type-aware rules against boxed-String output streams.
-      - name: Lint typescript action
-        working-directory: typescript
-        run: just lint
+      # One composite per action, in that action's folder: every test and dogfood step lives there.
+      - uses: ./orphan-release/test
+      - uses: ./secret-server/test
+      - uses: ./no-all-builds-job/test
+      - uses: ./no-tests-in-yaml/test
+      - uses: ./ste-lint/test
+      - uses: ./no-scripts-action/test
+      - uses: ./tag-cleanup/test
+      - uses: ./yaml-comment-block/test
+      - uses: ./push-excludes-tags/test
       - uses: ./typescript/test
-      # No action.yml, so the release matrix never reaches it; it tests itself.
-      - name: Shared cache-xfer unit tests
-        working-directory: _shared/cache-xfer
-        run: ts0 test
-      - name: Create hand-off payload
-        run: |
-          mkdir -p handoff-src/sub
-          echo "round-trip ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" > handoff-src/hello.txt
-          echo nested > handoff-src/sub/nested.txt
-      - name: Upload hand-off (dogfood-a)
-        uses: ./cache-upload
-        with:
-          name: dogfood-a
-          path: handoff-src
-      - name: Nameless download discovers the single hand-off
-        id: nameless
-        uses: ./cache-download
-        with:
-          path: restore-nameless
-      - name: Assert nameless discovery picked dogfood-a
-        run: |
-          test "${{ steps.nameless.outputs.name }}" = "dogfood-a"
-          diff handoff-src/hello.txt restore-nameless/hello.txt
-          diff handoff-src/sub/nested.txt restore-nameless/sub/nested.txt
-      - name: Named download still works
-        id: named
-        uses: ./cache-download
-        with:
-          name: dogfood-a
-          path: restore-named
-      - name: Assert named download restored the files
-        run: |
-          test "${{ steps.named.outputs.cache-hit }}" = "true"
-          test "${{ steps.named.outputs.name }}" = "dogfood-a"
-          diff handoff-src/hello.txt restore-named/hello.txt
-      - name: Upload a second hand-off (dogfood-b)
-        uses: ./cache-upload
-        with:
-          name: dogfood-b
-          path: handoff-src/hello.txt
-      # The REST list lags the twirp finalize, so wait for both entries.
-      - name: Wait for both hand-offs to be listable
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for i in $(seq 1 15); do
-            n=$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
-              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches?key=cache-xfer-${GITHUB_RUN_ID}-&per_page=100" \
-              | jq '[.actions_caches[].key] | length')
-            echo "listed ${n:-0} run-scoped entries"
-            [ "${n:-0}" -ge 2 ] && exit 0
-            sleep 2
-          done
-          echo "::error::cache list never showed both hand-offs"
-          exit 1
-      - name: Nameless download must hard-fail on ambiguity
-        id: ambiguous
-        continue-on-error: true
-        uses: ./cache-download
-        with:
-          path: restore-ambiguous
-      - name: Assert the ambiguous nameless download failed without restoring
-        run: |
-          test "${{ steps.ambiguous.outcome }}" = "failure"
-          test ! -e restore-ambiguous/hello.txt
-      - name: Cleanup deletes this run's entries
-        id: cleanup
-        uses: ./cache-cleanup
-      - name: Assert cleanup deleted both hand-offs
-        run: test "${{ steps.cleanup.outputs.deleted-count }}" -ge 2
+      - uses: ./_shared/cache-xfer/test
 
   # The shared cache-xfer tests on NT: its tar and path handling, and that a unix-origin hand-off runs there.
   cache-xfer-windows:
@@ -137,16 +55,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Download ts0
-        id: ts0
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
-        with:
-          project: ts0
-      - name: Shared cache-xfer unit tests
-        working-directory: _shared/cache-xfer
-        env:
-          TS0: ${{ steps.ts0.outputs.path }}
-        run: node $env:TS0 test
+      - uses: ./_shared/cache-xfer/test
 
   validate:
     runs-on: ubuntu-latest

@@ -1,0 +1,8 @@
+name: Test tag-cleanup
+version: 1
+description: Dogfood tag-cleanup against this repo's release tags (never released)
+
+runs:
+  using: composite
+  steps:
+    - uses: ./tag-cleanup

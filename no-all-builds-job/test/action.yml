@@ -5,6 +5,10 @@ description: Dogfood the all-builds guard against this repo, the shadowed fixtur
 runs:
   using: composite
   steps:
+    - uses: wow-look-at-my/dats@master
+      with:
+        tests: no-all-builds-job/dats
+
     - name: Guard passes on this repo
       uses: ./no-all-builds-job
 

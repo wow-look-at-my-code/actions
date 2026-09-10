@@ -1,0 +1,9 @@
+name: Test yaml-comment-block
+version: 1
+description: Dogfood the comment guard against this repo (never released)
+
+runs:
+  using: composite
+  steps:
+    # slopfix walks the tree itself, so a fixture that breaks a rule on purpose carries a suffix the walk does not select.
+    - uses: ./yaml-comment-block

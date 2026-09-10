@@ -1,0 +1,10 @@
+name: Test orphan-release
+version: 1
+description: Run the orphan-release dats suite against the built action (never released)
+
+runs:
+  using: composite
+  steps:
+    - uses: wow-look-at-my/dats@master
+      with:
+        tests: orphan-release/dats

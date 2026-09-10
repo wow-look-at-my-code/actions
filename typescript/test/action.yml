@@ -5,6 +5,12 @@ description: "Dogfood the typescript action via file: inputs exercising import/e
 runs:
   using: composite
   steps:
+    # Type-aware rules against boxed-String output streams.
+    - name: Lint
+      working-directory: typescript
+      shell: bash
+      run: just lint
+
     # repro.ts: top-level import, injected globals, top-level await, global fetch.
     - name: "repro.ts: import + globals + await + fetch"
       uses: ./typescript
