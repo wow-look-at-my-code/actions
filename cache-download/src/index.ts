@@ -61,6 +61,7 @@ import {internalCacheTwirpClient} from '@actions/cache/lib/internal/shared/cache
 import {ambiguityMessage, distinctHandoffNames} from './discovery';
 import {handoffKey, handoffRestorePrefix, handoffVersion, legacyHandoffKey, legacyHandoffRestorePrefix, legacyHandoffVersion, nameFromKey, runRestorePrefix, validateName} from '../../_shared/cache-xfer/lib';
 import {MissOutcome, missOutcome, namelessMissOutcome} from './miss';
+import {inputLines, planDownloads} from './plan';
 import {unpackFromFile} from '../../_shared/cache-xfer/xfer';
 
 function requireEnv(name: string): string {
@@ -201,41 +202,78 @@ async function run(): Promise<void> {
 		throw new Error(`cache-download requires the v2 cache service (github.com); this runner reports '${serviceVersion}'. GHES is not supported.`);
 	}
 
-	const nameInput = core.getInput('name');
-	const pathInput = core.getInput('path');
+	const names = inputLines(core.getInput('name'));
+	const paths = inputLines(core.getInput('path'));
 	const failIfMissing = core.getBooleanInput('fail-if-missing');
-	if (nameInput) {
-		validateName(nameInput);
+	for (const name of names) {
+		validateName(name);
 	}
 
 	// Artifact parity: the destination is a real directory of the consumer's
 	// choosing, defaulting to the workspace. Nothing about it needs to match
 	// what the producer passed to cache-upload.
 	const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-	const destination = path.resolve(workspace, expandTilde(pathInput || '.'));
+	const plans = planDownloads(names, paths);
+	const resolveDest = (p: string): string => path.resolve(workspace, expandTilde(p));
 
 	const runId = requireEnv('GITHUB_RUN_ID');
 	const runAttempt = process.env.GITHUB_RUN_ATTEMPT || '1';
-
 	const twirpClient = internalCacheTwirpClient();
-	const resolved = nameInput
-		? await resolveNamed(twirpClient, nameInput, runId, runAttempt, failIfMissing)
-		: await resolveNameless(twirpClient, runId, runAttempt, failIfMissing);
-	if (resolved === 'ambiguous') {
-		return;
+
+	const restored: Restored[] = [];
+	if (plans.length === 0) {
+		const resolved = await resolveNameless(twirpClient, runId, runAttempt, failIfMissing);
+		if (resolved === 'ambiguous') {
+			return;
+		}
+		const one = await restoreOne(resolved, resolveDest(paths[0] ?? '.'), runId, runAttempt);
+		if (one === 'missing') {
+			return;
+		}
+		core.notice(`cache-download picked hand-off '${one.name}' for this run (key ${one.matchedKey})`);
+		restored.push(one);
+	}
+	for (const plan of plans) {
+		const resolved = await resolveNamed(twirpClient, plan.name, runId, runAttempt, failIfMissing);
+		const one = await restoreOne(resolved, resolveDest(plan.destination), runId, runAttempt);
+		if (one === 'missing') {
+			if (resolved.miss.fail) {
+				return;
+			}
+			continue;
+		}
+		restored.push(one);
 	}
 
+	// Several hand-offs report one line each, in input order. cache-hit is
+	// true only when every one was this attempt's own entry.
+	core.setOutput('cache-hit', String(restored.length > 0 && restored.every(r => r.exactHit)));
+	core.setOutput('cache-matched-key', restored.map(r => r.matchedKey).join('\n'));
+	core.setOutput('download-path', restored.map(r => r.destination).join('\n'));
+	core.setOutput('name', restored.map(r => r.name).join('\n'));
+}
+
+/** One restored hand-off, as the outputs report it. */
+interface Restored {
+	name: string;
+	matchedKey: string;
+	destination: string;
+	exactHit: boolean;
+}
+
+/**
+ * Download and unpack one resolved hand-off into `destination`. A miss is
+ * reported the way `resolved.miss` says (a failed step, or a log line) and
+ * answered with 'missing'.
+ */
+async function restoreOne(resolved: Resolution, destination: string, runId: string, runAttempt: string): Promise<Restored | 'missing'> {
 	if (!resolved.lookup.ok) {
-		core.setOutput('cache-hit', 'false');
-		core.setOutput('cache-matched-key', '');
-		core.setOutput('download-path', '');
-		core.setOutput('name', '');
 		if (resolved.miss.fail) {
 			core.setFailed(resolved.miss.message);
 		} else {
 			core.info(resolved.miss.message);
 		}
-		return;
+		return 'missing';
 	}
 
 	const matchedKey = resolved.lookup.matchedKey;
@@ -245,7 +283,7 @@ async function run(): Promise<void> {
 
 	const tempDir = await fsp.mkdtemp(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cache-xfer-'));
 	const archivePath = path.join(tempDir, 'handoff.wxfr');
-	let resolvedName: string;
+	let name: string;
 	try {
 		// Explicitly upstream's own defaults, NOT the Azure SDK path — see the
 		// downloadCache note in the header comment for why.
@@ -253,26 +291,19 @@ async function run(): Promise<void> {
 		const header = await unpackFromFile(archivePath, destination);
 		// The envelope is the authority on the name (v1 archives, reachable
 		// only via the named legacy fallback, predate the field).
-		resolvedName = header.name ?? resolved.name ?? nameFromKey(matchedKey, runId) ?? '';
-		core.info(`Restored hand-off '${resolvedName}' (${header.mode}) into ${destination}`);
+		name = header.name ?? resolved.name ?? nameFromKey(matchedKey, runId) ?? '';
+		core.info(`Restored hand-off '${name}' (${header.mode}) into ${destination}`);
 	} finally {
 		await fsp.rm(tempDir, {recursive: true, force: true});
 	}
 
-	if (!nameInput) {
-		core.notice(`cache-download picked hand-off '${resolvedName}' for this run (key ${matchedKey})`);
-	}
-
 	// Exact hit = this attempt's own key (either layout during the
 	// TRANSITION); a prefix match means an earlier attempt's entry.
-	const exactHit = resolvedName !== '' && (matchedKey === handoffKey(resolvedName, runId, runAttempt) || matchedKey === legacyHandoffKey(resolvedName, runId, runAttempt));
+	const exactHit = name !== '' && (matchedKey === handoffKey(name, runId, runAttempt) || matchedKey === legacyHandoffKey(name, runId, runAttempt));
 	if (!exactHit) {
 		core.info('Matched an earlier attempt of this run');
 	}
-	core.setOutput('cache-hit', String(exactHit));
-	core.setOutput('cache-matched-key', matchedKey);
-	core.setOutput('download-path', destination);
-	core.setOutput('name', resolvedName);
+	return {name, matchedKey, destination, exactHit};
 }
 
 run().catch((error: unknown) => {

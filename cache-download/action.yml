@@ -5,17 +5,22 @@ description: Restore files handed off by cache-upload earlier in the same workfl
 inputs:
   name:
     description: >-
-      Hand-off name used by the matching cache-upload step. Optional: when
-      omitted, the single hand-off of this run is discovered automatically
-      (run-scoped key prefix). If this run saved MORE THAN ONE hand-off the
-      nameless mode hard-fails naming the candidates when it can list them
-      (needs github-token with actions: read), and otherwise restores the
-      newest entry with a warning — runs with multiple hand-offs should keep
+      Hand-off name used by the matching cache-upload step, or several, one
+      per line, restored in one step. Optional: when omitted, the single
+      hand-off of this run is discovered automatically (run-scoped key
+      prefix). If this run saved MORE THAN ONE hand-off the nameless mode
+      hard-fails naming the candidates when it can list them (needs
+      github-token with actions: read), and otherwise restores the newest
+      entry with a warning — runs with multiple hand-offs should keep
       passing an explicit name.
     required: false
     default: ''
   path:
-    description: 'Destination directory to restore into (defaults to the workspace)'
+    description: >-
+      Destination directory to restore into (defaults to the workspace).
+      With several names, one path puts each hand-off in its own
+      <path>/<name> directory, and one path per line pairs with the names
+      in order.
     required: false
     default: ''
   fail-if-missing:
@@ -33,13 +38,13 @@ inputs:
 
 outputs:
   download-path:
-    description: 'Absolute path of the directory the files were restored into'
+    description: 'Absolute path of the directory the files were restored into (one line per hand-off)'
   cache-hit:
-    description: 'true on an exact key match (same run attempt); false when restored from an earlier attempt'
+    description: 'true when every hand-off was an exact key match (same run attempt); false when one came from an earlier attempt'
   cache-matched-key:
-    description: 'Cache key actually restored (empty on a miss)'
+    description: 'Cache key actually restored (one line per hand-off; empty on a miss)'
   name:
-    description: 'Hand-off name actually restored (the input name, or the discovered one in nameless mode; empty on a miss)'
+    description: 'Hand-off name actually restored (one line per hand-off: the input name, or the discovered one in nameless mode; empty on a miss)'
 
 runs:
   using: node24

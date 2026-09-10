@@ -7,7 +7,10 @@ inputs:
     description: 'Hand-off name, unique within the workflow run (like an artifact name)'
     required: true
   path:
-    description: 'File or directory to hand off (a directory is captured as its contents)'
+    description: >-
+      File or directory to hand off (a directory is captured as its
+      contents), or several paths, one per line, kept under their paths
+      relative to the workspace.
     required: true
 
 outputs:

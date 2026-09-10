@@ -113,6 +113,23 @@ jobs:
           done
           echo "::error::cache list never showed both hand-offs"
           exit 1
+      - name: One step restores both hand-offs under one root
+        id: both
+        uses: ./cache-download
+        with:
+          name: |
+            dogfood-a
+            dogfood-b
+          path: restore-both
+      - name: Assert both landed in their own directories, in order
+        env:
+          NAMES: ${{ steps.both.outputs.name }}
+        run: |
+          test "${{ steps.both.outputs.cache-hit }}" = "true"
+          test "$NAMES" = "$(printf 'dogfood-a\ndogfood-b')"
+          diff handoff-src/hello.txt restore-both/dogfood-a/hello.txt
+          diff handoff-src/sub/nested.txt restore-both/dogfood-a/sub/nested.txt
+          diff handoff-src/hello.txt restore-both/dogfood-b/hello.txt
       - name: Nameless download must hard-fail on ambiguity
         id: ambiguous
         continue-on-error: true
