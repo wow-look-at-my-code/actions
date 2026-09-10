@@ -180,8 +180,18 @@ test('a unix-origin archive restores a file NT runs by its extension', {skip: un
 		const unzstd = spawnSync('zstd', ['-d', '-c'], {input: payload});
 		await fsp.writeFile(plainTar, unzstd.stdout);
 		const listing = spawnSync('tar', ['-tvf', plainTar], {encoding: 'utf8'});
+		const fromFile = path.join(base, 'from-file');
+		await fsp.mkdir(fromFile);
+		const xFile = spawnSync('tar', ['-xvf', plainTar, '-C', fromFile.replace(/\\/g, '/')], {encoding: 'utf8'});
+		const fromStdin = path.join(base, 'from-stdin');
+		await fsp.mkdir(fromStdin);
+		const xStdin = spawnSync('tar', ['-xvf', '-', '-C', fromStdin.replace(/\\/g, '/')], {input: unzstd.stdout, encoding: 'utf8'});
 		const tarVersion = spawnSync('tar', ['--version'], {encoding: 'utf8'}).stdout.split('\n')[0];
-		assert.fail(`hello.cmd was not restored; dest holds ${JSON.stringify(await fsp.readdir(dest).catch(() => 'nothing'))}; archive ${(await fsp.stat(archive)).size} bytes, tar payload ${unzstd.stdout.length} bytes listing:\n${listing.stdout}${listing.stderr}\n${tarVersion}`);
+		assert.fail(
+			`hello.cmd was not restored; dest holds ${JSON.stringify(await fsp.readdir(dest).catch(() => 'nothing'))}; archive ${(await fsp.stat(archive)).size} bytes, tar payload ${unzstd.stdout.length} bytes listing:\n${listing.stdout}${listing.stderr}\n` +
+				`extract from file: status ${xFile.status} ${xFile.stdout}${xFile.stderr} -> ${JSON.stringify(await fsp.readdir(fromFile))}\n` +
+				`extract from stdin: status ${xStdin.status} ${xStdin.stdout}${xStdin.stderr} -> ${JSON.stringify(await fsp.readdir(fromStdin))}\n${tarVersion}`
+		);
 	}
 	const run = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/c', `"${restored}"`], {encoding: 'utf8', windowsVerbatimArguments: true});
 	assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
