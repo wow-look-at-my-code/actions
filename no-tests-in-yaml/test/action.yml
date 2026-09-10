@@ -1,8 +1,0 @@
-name: Test no-tests-in-yaml
-version: 1
-description: Dogfood the guard against this repo's own workflows (never released)
-
-runs:
-  using: composite
-  steps:
-    - uses: ./no-tests-in-yaml

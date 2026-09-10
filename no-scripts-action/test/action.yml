@@ -1,8 +1,0 @@
-name: Test no-scripts-action
-version: 1
-description: Dogfood the guard against this repo (never released)
-
-runs:
-  using: composite
-  steps:
-    - uses: ./no-scripts-action

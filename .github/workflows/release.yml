@@ -34,16 +34,25 @@ jobs:
       - uses: ./run-once
         with:
           name: common-checks
-      # One composite per action, in that action's folder: every test and dogfood step lives there.
-      - uses: ./orphan-release/test
-      - uses: ./secret-server/test
+      # The guard suites drive dist/, so they run after the build above.
+      - uses: wow-look-at-my/dats@master
+        with:
+          tests: |
+            orphan-release/dats/
+            secret-server/dats/
+      # An action with tests of its own keeps them in its test composite; a guard is dogfooded by running it.
       - uses: ./no-all-builds-job/test
-      - uses: ./no-tests-in-yaml/test
-      - uses: ./ste-lint/test
-      - uses: ./no-scripts-action/test
-      - uses: ./tag-cleanup/test
-      - uses: ./yaml-comment-block/test
-      - uses: ./push-excludes-tags/test
+      - uses: ./no-tests-in-yaml
+      # ste-lint/fixtures/* break the rules on purpose, hence .md.fixture and this glob.
+      - uses: ./ste-lint
+        with:
+          files: '*.md docs/*.md .github/workflows/*.md */README.md */CLAUDE.md'
+      - uses: ./no-scripts-action
+      - uses: ./tag-cleanup
+      # slopfix walks the tree itself, so a fixture that breaks a rule on purpose carries a suffix the walk does not select.
+      - uses: ./yaml-comment-block
+      # Dogfooded so its inline script is COMPILED here. An inline script is checked where it runs, so without this the only place it fails is a consumer's build.
+      - uses: ./push-excludes-tags
       - uses: ./typescript/test
       - uses: ./_shared/cache-xfer/test
 
