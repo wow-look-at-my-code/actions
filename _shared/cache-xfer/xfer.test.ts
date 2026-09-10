@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import {test} from 'node:test';
 import {spawn} from 'node:child_process';
 import {Readable} from 'node:stream';
-import {packToFile, pipeIntoStdin, readEnvelope, unpackFromFile} from './xfer';
+import {packEntriesToFile, packToFile, pipeIntoStdin, readEnvelope, unpackFromFile} from './xfer';
 
 // Local pack/unpack round-trips (spawns real tar + zstd; no cache service).
 
@@ -148,4 +148,30 @@ test('repeated directory round-trips neither fail nor lose bytes', async t => {
 		}
 		await fsp.rm(dest, {recursive: true, force: true});
 	}
+});
+
+test('several entries round-trip under their relative paths', async t => {
+	const base = await fsp.mkdtemp(path.join(os.tmpdir(), 'xfer-entries-'));
+	t.after(() => fsp.rm(base, {recursive: true, force: true}));
+	await fsp.mkdir(path.join(base, 'bin'));
+	await fsp.mkdir(path.join(base, 'pkg', 'tool', 'linux_amd64'), {recursive: true});
+	await fsp.writeFile(path.join(base, 'bin', 'go'), '#!/bin/sh\necho go\n', {mode: 0o755});
+	await fsp.writeFile(path.join(base, 'pkg', 'tool', 'linux_amd64', 'compile'), 'compile', {mode: 0o755});
+	await fsp.writeFile(path.join(base, 'pkg', 'obj'), 'not handed off');
+	await fsp.writeFile(path.join(base, 'VERSION'), 'go1.27.0\n');
+
+	const archive = path.join(base, 'handoff.wxfr');
+	const packed = await packEntriesToFile(base, ['bin', 'pkg/tool', 'VERSION'], archive, 'entries-handoff');
+	assert.equal(packed.mode, 'tar');
+
+	const dest = await fsp.mkdtemp(path.join(os.tmpdir(), 'xfer-entries-dest-'));
+	t.after(() => fsp.rm(dest, {recursive: true, force: true}));
+	await unpackFromFile(archive, dest);
+	assert.equal(await fsp.readFile(path.join(dest, 'bin', 'go'), 'utf8'), '#!/bin/sh\necho go\n');
+	assert.equal((await fsp.stat(path.join(dest, 'bin', 'go'))).mode & 0o111, 0o111);
+	assert.equal(await fsp.readFile(path.join(dest, 'pkg', 'tool', 'linux_amd64', 'compile'), 'utf8'), 'compile');
+	assert.equal(await fsp.readFile(path.join(dest, 'VERSION'), 'utf8'), 'go1.27.0\n');
+	await assert.rejects(fsp.stat(path.join(dest, 'pkg', 'obj')), 'an entry not named stays behind');
+	await assert.rejects(packEntriesToFile(base, ['../etc'], archive, 'escape'), /inside it/);
+	await assert.rejects(packEntriesToFile(base, ['missing'], archive, 'missing'), /does not exist/);
 });

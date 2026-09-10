@@ -45,7 +45,7 @@ import * as cacheHttpClient from '@actions/cache/lib/internal/cacheHttpClient';
 import {getCacheServiceVersion} from '@actions/cache/lib/internal/config';
 import {internalCacheTwirpClient} from '@actions/cache/lib/internal/shared/cacheTwirpClient';
 import {handoffKey, handoffVersion, validateName} from '../../_shared/cache-xfer/lib';
-import {packToFile} from '../../_shared/cache-xfer/xfer';
+import {packEntriesToFile, packToFile} from '../../_shared/cache-xfer/xfer';
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -73,10 +73,13 @@ async function run(): Promise<void> {
 
 	const name = core.getInput('name', {required: true});
 	const pathInput = core.getInput('path', {required: true});
+	const pathLines = pathInput.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 	validateName(name);
 
 	const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-	const source = path.resolve(workspace, expandTilde(pathInput));
+	const source = path.resolve(workspace, expandTilde(pathLines[0] ?? pathInput));
+	// Several lines name several things out of the workspace tree; the archive keeps their relative paths.
+	const entries = pathLines.length > 1 ? pathLines.map(p => path.relative(workspace, path.resolve(workspace, expandTilde(p)))) : undefined;
 
 	const key = handoffKey(name, requireEnv('GITHUB_RUN_ID'), process.env.GITHUB_RUN_ATTEMPT || '1');
 	const version = handoffVersion();
@@ -84,9 +87,9 @@ async function run(): Promise<void> {
 	const tempDir = await fsp.mkdtemp(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cache-xfer-'));
 	const archivePath = path.join(tempDir, 'handoff.wxfr');
 	try {
-		const header = await packToFile(source, archivePath, name);
+		const header = entries ? await packEntriesToFile(workspace, entries, archivePath, name) : await packToFile(source, archivePath, name);
 		const archiveSize = (await fsp.stat(archivePath)).size;
-		core.info(`Packed '${source}' (${header.mode}) into ${archiveSize} byte archive`);
+		core.info(`Packed '${entries ? entries.join(' ') : source}' (${header.mode}) into ${archiveSize} byte archive`);
 
 		const twirpClient = internalCacheTwirpClient();
 		core.info(`Saving hand-off '${name}' with key ${key}`);

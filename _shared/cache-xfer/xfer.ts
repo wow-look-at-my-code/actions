@@ -165,6 +165,42 @@ export async function packToFile(sourcePath: string, archivePath: string, name: 
 	return header;
 }
 
+/**
+ * Pack several entries into one tar-mode archive. Each entry is a path
+ * relative to `base`, a file or a directory, and the archive carries it under
+ * that same relative path, so a download into a destination recreates the
+ * layout: `bin/go` stays `<dest>/bin/go`. This is the multi-path form of
+ * packToFile, for a hand-off that is a few things out of a tree rather than
+ * one file or one directory.
+ */
+export async function packEntriesToFile(base: string, entries: string[], archivePath: string, name: string): Promise<EnvelopeHeader> {
+	if (entries.length === 0) {
+		throw new Error('no paths to hand off');
+	}
+	for (const entry of entries) {
+		if (path.isAbsolute(entry) || entry === '' || entry.split(/[\\/]/).includes('..')) {
+			throw new Error(`path '${entry}' must be relative to '${base}' and inside it`);
+		}
+		try {
+			await fsp.stat(path.join(base, entry));
+		} catch {
+			throw new Error(`path '${path.join(base, entry)}' does not exist; nothing to hand off`);
+		}
+	}
+	const header: EnvelopeHeader = {mode: 'tar', codec: 'zstd', name};
+	const out = fs.createWriteStream(archivePath);
+	out.write(encodeEnvelope(header));
+	const zstd = spawn('zstd', ZSTD_COMPRESS_ARGS, {stdio: ['pipe', 'pipe', 'pipe']});
+	const zstdErr = collectStderr(zstd);
+	const tarSpec = await tarInvocation();
+	const tar = spawn(tarSpec.cmd, ['-cf', '-', ...tarSpec.extraArgs, '-C', tarSpec.fixPath(base), ...entries], {
+		stdio: ['ignore', 'pipe', 'pipe']
+	});
+	const tarErr = collectStderr(tar);
+	await awaitStages([pipeline(zstd.stdout, out), waitExit(zstd, 'zstd', zstdErr), pipeIntoStdin(tar.stdout, zstd.stdin), waitExit(tar, 'tar', tarErr)]);
+	return header;
+}
+
 /** Read and validate the envelope prefix of an archive file. */
 export async function readEnvelope(archivePath: string): Promise<{header: EnvelopeHeader; dataOffset: number}> {
 	const fh = await fsp.open(archivePath, 'r');
