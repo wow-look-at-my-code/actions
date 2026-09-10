@@ -2,232 +2,71 @@ name: Release Actions
 
 on:
   push:
+    branches:
+      - '**'
   workflow_dispatch:
 
 jobs:
-  cleanup:
+  # Every suite, guard and dogfood run this repo does.
+  checks:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cleanup orphaned branch tags
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: ./orphan-release/orphan-cleanup.sh
-
-  check-readme:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check README is up-to-date
-        run: |
-          ./generate-readme.sh > README.md.tmp
-          if ! diff -q README.md README.md.tmp > /dev/null 2>&1; then
-            echo "::error::README.md is out of date. Run ./generate-readme.sh > README.md and commit the result."
-            diff README.md README.md.tmp || true
-            exit 1
-          fi
-          rm README.md.tmp
-
-  no-scripts:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-and-build
-        with:
-          action-dir: no-scripts-action
-      - uses: ./no-scripts-action
-
-  test-cache-rg:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./cache-rg/test
-
-  # see docs/release-workflow.md
-  test-orphan-release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install dats
-        run: |
-          sudo apt-get update && sudo apt-get install -y bubblewrap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          curl -fL --compressed "https://dl.pazer.build/dats?os=linux&arch=amd64" -o /usr/local/bin/dats
-          chmod +x /usr/local/bin/dats
-          dats --version
-      - run: dats test orphan-release/dats/
-
-  # Round-trip against the REAL cache service. see docs/release-workflow.md
-  test-cache-xfer:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write # cache-cleanup deletes entries; nameless discovery lists them
-    steps:
-      - uses: actions/checkout@v4
-      # Toolchain only -- this job builds three directories itself below.
-      - uses: ./.github/actions/setup-and-build
-      # node24 actions: dist/ is not committed, so build before `uses: ./...`.
-      - name: Build the cache hand-off trio
-        run: |
-          for a in cache-upload cache-download cache-cleanup; do
-            (cd "$a" && just build)
-          done
-      # shared/cache-xfer has no package.json, so the release matrix never tests it.
-      - name: Shared cache-xfer unit tests
-        working-directory: cache-download
-        run: pnpm tsx --test ../shared/cache-xfer/*.test.ts
-      - name: Create hand-off payload
-        run: |
-          mkdir -p handoff-src/sub
-          echo "round-trip ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" > handoff-src/hello.txt
-          echo nested > handoff-src/sub/nested.txt
-      - name: Upload hand-off (dogfood-a)
-        uses: ./cache-upload
-        with:
-          name: dogfood-a
-          path: handoff-src
-      - name: Nameless download discovers the single hand-off
-        id: nameless
-        uses: ./cache-download
-        with:
-          path: restore-nameless
-      - name: Assert nameless discovery picked dogfood-a
-        run: |
-          test "${{ steps.nameless.outputs.name }}" = "dogfood-a"
-          diff handoff-src/hello.txt restore-nameless/hello.txt
-          diff handoff-src/sub/nested.txt restore-nameless/sub/nested.txt
-      - name: Named download still works
-        id: named
-        uses: ./cache-download
-        with:
-          name: dogfood-a
-          path: restore-named
-      - name: Assert named download restored the files
-        run: |
-          test "${{ steps.named.outputs.cache-hit }}" = "true"
-          test "${{ steps.named.outputs.name }}" = "dogfood-a"
-          diff handoff-src/hello.txt restore-named/hello.txt
-      - name: Upload a second hand-off (dogfood-b)
-        uses: ./cache-upload
-        with:
-          name: dogfood-b
-          path: handoff-src/hello.txt
-      # The REST list lags the twirp finalize, so wait for both entries.
-      - name: Wait for both hand-offs to be listable
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for i in $(seq 1 15); do
-            n=$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
-              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches?key=cache-xfer-${GITHUB_RUN_ID}-&per_page=100" \
-              | jq '[.actions_caches[].key] | length')
-            echo "listed ${n:-0} run-scoped entries"
-            [ "${n:-0}" -ge 2 ] && exit 0
-            sleep 2
-          done
-          echo "::error::cache list never showed both hand-offs"
-          exit 1
-      - name: Nameless download must hard-fail on ambiguity
-        id: ambiguous
-        continue-on-error: true
-        uses: ./cache-download
-        with:
-          path: restore-ambiguous
-      - name: Assert the ambiguous nameless download failed without restoring
-        run: |
-          test "${{ steps.ambiguous.outcome }}" = "failure"
-          test ! -e restore-ambiguous/hello.txt
-      - name: Cleanup deletes this run's entries
-        id: cleanup
-        uses: ./cache-cleanup
-      - name: Assert cleanup deleted both hand-offs
-        run: test "${{ steps.cleanup.outputs.deleted-count }}" -ge 2
-
-  # see docs/release-workflow.md
-  test-no-all-builds-job:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read # the guard's run-jobs layer must be able to run
+      contents: write # tag-cleanup deletes orphaned release tags
+      actions: write # cache-cleanup deletes entries; the all-builds guard lists jobs
       checks: read # the guard's check-runs layer must be able to run
     steps:
       - uses: actions/checkout@v4
-      # node24 action: dist/ is not committed, so build before `uses: ./...`.
+      - uses: ./cache-rg/test
+      # Toolchain only -- every node24 action this job runs is built below.
       - uses: ./.github/actions/setup-and-build
+      # node24 actions: dist/ is not committed, so build before `uses: ./...`.
+      - name: Build the typescript action, which builds the rest
+        run: cd typescript && just build
+      - name: Build the actions this job runs
+        uses: ./typescript
         with:
-          action-dir: no-all-builds-job
-      - name: Guard passes on this repo
-        uses: ./no-all-builds-job
-      # A step `env:` cannot override GITHUB_*. see docs/release-workflow.md
-      - name: Guard must fail on the shadowed fixture (file-scan layer)
-        id: shadowed
-        continue-on-error: true
-        run: NO_ALL_BUILDS_JOB_ALREADY_RAN= GITHUB_WORKSPACE="${GITHUB_WORKSPACE}/no-all-builds-job/test/fixtures/shadowed" INPUT_TOKEN= node no-all-builds-job/dist/index.js
-      - name: Assert the shadowed fixture failed the guard
-        run: test "${{ steps.shadowed.outcome }}" = "failure"
-      # A layer that cannot scan is a blocking error. see docs/release-workflow.md
-      - name: Guard must fail when the API layers cannot run
-        id: layers
-        continue-on-error: true
-        run: NO_ALL_BUILDS_JOB_ALREADY_RAN= INPUT_TOKEN=x node no-all-builds-job/dist/index.js
-      - name: Assert the unrunnable API layers failed the guard
-        run: test "${{ steps.layers.outcome }}" = "failure"
-      # The sentinel skips the guard before any check runs.
-      - name: Guard skips when the run-once sentinel is set
-        run: NO_ALL_BUILDS_JOB_ALREADY_RAN=1 GITHUB_WORKSPACE="${GITHUB_WORKSPACE}/no-all-builds-job/test/fixtures/shadowed" INPUT_TOKEN=x node no-all-builds-job/dist/index.js
-
-  ste-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-and-build
+          script: |
+            const dirs = ['no-tests-in-yaml', 'no-scripts-action', 'tag-cleanup', 'no-all-builds-job',
+              'ste-lint', 'cache-upload', 'cache-download', 'cache-cleanup', 'run-once',
+              'orphan-release'];
+            await Promise.all(dirs.map(dir => $`just build`.cwd(dir)));
+      # This job runs every common-check below from THIS checkout, so it claims the once-per-run slot: otherwise a downstream action pulls in the PUBLISHED copy and the repo cannot publish a fix for its own check.
+      - uses: ./run-once
         with:
-          action-dir: ste-lint
-      # ste-lint/fixtures/*.md break the rules on purpose, so they are not listed.
+          name: common-checks
+      # The guard suites drive dist/, so they run after the build above.
+      - uses: wow-look-at-my/dats@master
+        with:
+          tests: |
+            orphan-release/dats/
+            secret-server/dats/
+      # An action with tests of its own keeps them in its test composite; a guard is dogfooded by running it.
+      - uses: ./no-all-builds-job/test
+      - uses: ./no-tests-in-yaml
+      # ste-lint/fixtures/* break the rules on purpose, hence .md.fixture and this glob.
       - uses: ./ste-lint
         with:
           files: '*.md docs/*.md .github/workflows/*.md */README.md */CLAUDE.md'
-
-  # see docs/release-workflow.md
-  test-yaml-comment-block:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-and-build
-        with:
-          action-dir: yaml-comment-block
-      - name: Check passes on this repo
-        uses: ./yaml-comment-block
-      - name: Check must fail on the wall fixture
-        id: wall
-        continue-on-error: true
-        run: GITHUB_WORKSPACE="${GITHUB_WORKSPACE}/yaml-comment-block/test/fixtures/wall" node yaml-comment-block/dist/index.js
-      - name: Assert the wall fixture failed the check
-        run: test "${{ steps.wall.outcome }}" = "failure"
-      - name: Check must pass on the at-the-limit fixture
-        run: GITHUB_WORKSPACE="${GITHUB_WORKSPACE}/yaml-comment-block/test/fixtures/clean" node yaml-comment-block/dist/index.js
-
-  test-typescript:
-    runs-on: ubuntu-latest
-    # repro3.ts makes a real authenticated repos.get call with the default token.
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      # node24 action: dist/ is not committed, so build before `uses: ./...`.
-      - uses: ./.github/actions/setup-and-build
-        with:
-          action-dir: typescript
-      # Type-aware rules against boxed-String output streams.
-      - name: Lint typescript action
-        working-directory: typescript
-        run: just lint
+      - uses: ./no-scripts-action
+      - uses: ./tag-cleanup
+      # slopfix walks the tree itself, so a fixture that breaks a rule on purpose carries a suffix the walk does not select.
+      - uses: ./yaml-comment-block
+      # Dogfooded so its inline script is COMPILED here. An inline script is checked where it runs, so without this the only place it fails is a consumer's build.
+      - uses: ./push-excludes-tags
       - uses: ./typescript/test
+      - uses: ./_shared/cache-xfer/test
 
-  validate-slugs:
+  # The shared cache-xfer tests on NT: its tar and path handling, and that a unix-origin hand-off runs there.
+  cache-xfer-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: ./_shared/cache-xfer/test
+
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -250,19 +89,16 @@ jobs:
             exit 1
           fi
 
-  validate-workflows:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - name: Validate workflow YAML with action-validator
         uses: ./action-validator
         with:
-          # Workflow files only. see docs/release-workflow.md
+          # A required input this step has no use for: release-node checks each action.yml.
           actions: 'no-such-dir/*/action.yml'
           workflows: '.github/workflows/*.yml'
 
   detect:
-    if: github.event_name == 'push'
+    # It enumerates every action rather than diffing, so a dispatch republishes the lot, which is what a recovery run wants.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       node: ${{ steps.find.outputs.node }}
@@ -286,8 +122,9 @@ jobs:
           echo "composite=$(composite | jq -R | jq -sc)" >> $GITHUB_OUTPUT
 
   release-node:
-    needs: [cleanup, detect]
-    if: needs.detect.outputs.node != '[]'
+    needs: [checks, detect]
+    # A push publishes only behind green checks. A manual dispatch publishes regardless, which is the operator escape hatch for a broken published action that gates its own replacement.
+    if: always() && needs.detect.result == 'success' && needs.detect.outputs.node != '[]' && (github.event_name == 'workflow_dispatch' || needs.checks.result == 'success')
     strategy:
       fail-fast: false
       matrix:
@@ -302,12 +139,10 @@ jobs:
         with:
           action-dir: ${{ matrix.action }}
 
+      # Type-checks the project, then runs whatever test files it finds; none is a pass.
       - name: Test
         working-directory: ${{ matrix.action }}
-        run: |
-          if compgen -G "src/*.test.ts" > /dev/null; then
-            pnpm tsx --test src/*.test.ts
-          fi
+        run: ts0 test
 
       - name: Validate action.yml
         run: |
@@ -341,32 +176,43 @@ jobs:
             fi
           done
 
-      # Master only. Versions auto-increment and unchanged actions are skipped.
+      # dist/ is not committed, and the matrix build above built the action under release, not this one.
+      - name: Build the release tool
+        if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+        working-directory: orphan-release
+        run: just build
+
+      # The default branch, or a dispatch the operator started by hand. This is the only gate on publishing: the release tool publishes whatever it is asked to. Versions auto-increment and unchanged actions are skipped.
       - name: Create orphan tag
-        if: github.ref == 'refs/heads/master'
+        if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >
-          ./orphan-release/orphan-release.sh
+          node ./orphan-release/dist/index.js
           --source "${{ matrix.action }}"
-          --exclude "src node_modules tsconfig.json justfile package.json pnpm-lock.yaml pnpm-workspace.yaml"
+          --exclude "src node_modules tsconfig.json ts0.json justfile package.json pnpm-lock.yaml pnpm-workspace.yaml"
 
   release-composite:
-    needs: [cleanup, detect]
-    if: needs.detect.outputs.composite != '[]'
+    needs: [checks, detect]
+    # Same gate as release-node: green checks on a push, operator's word on a dispatch.
+    if: always() && needs.detect.result == 'success' && needs.detect.outputs.composite != '[]' && (github.event_name == 'workflow_dispatch' || needs.checks.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      # Master only. Versions auto-increment and unchanged actions are skipped.
+      - uses: ./.github/actions/setup-and-build
+        with:
+          action-dir: orphan-release
+
+      # Same gate as release-node: the default branch, or a hand-started dispatch.
       - name: Create orphan tags
-        if: github.ref == 'refs/heads/master'
+        if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           for action in $(echo '${{ needs.detect.outputs.composite }}' | jq -r '.[]'); do
-            ./orphan-release/orphan-release.sh --source "$action"
+            node ./orphan-release/dist/index.js --source "$action"
           done
 

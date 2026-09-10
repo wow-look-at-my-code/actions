@@ -13,7 +13,7 @@
 // is restored — which is why multi-producer runs must keep explicit names
 // (see action.yml / README).
 
-import {nameFromKey} from '../../shared/cache-xfer/lib';
+import {nameFromKey} from '../../_shared/cache-xfer/lib';
 
 /**
  * Distinct current-layout hand-off names among the listed keys of run

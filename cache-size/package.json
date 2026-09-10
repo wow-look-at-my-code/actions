@@ -9,10 +9,5 @@
   "type": "commonjs",
   "dependencies": {
     "@actions/core": "^2.0.2"
-  },
-  "devDependencies": {
-    "@types/node": "^25.0.10",
-    "esbuild": "^0.28.1",
-    "typescript": "^5.9.3"
   }
 }

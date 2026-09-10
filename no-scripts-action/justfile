@@ -4,5 +4,4 @@ help:
 
 build:
 	pnpm install
-	pnpm tsc
-	pnpm esbuild build/main.js --bundle --platform=node --target=node24 --minify --outfile=dist/index.js
+	ts0 build

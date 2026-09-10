@@ -1,0 +1,86 @@
+name: Has Permission
+description: Report whether a permission is granted to the running job by its job or workflow permissions block
+
+inputs:
+  permission:
+    description: Permission scope to look for, such as id-token, contents or packages
+    required: true
+  level:
+    description: Level the caller needs - read, write or none. write satisfies read.
+    required: false
+    default: write
+  assert:
+    description: Fail the step when the permission is not granted
+    required: false
+    default: 'false'
+
+outputs:
+  granted:
+    description: 'true when the job holds the permission at the requested level'
+    value: ${{ fromJSON(steps.resolve.outputs.result).granted }}
+  level:
+    description: Level the resolved block gives for this permission - none, read or write
+    value: ${{ fromJSON(steps.resolve.outputs.result).level }}
+  source:
+    description: Block the level came from - job, workflow or default
+    value: ${{ fromJSON(steps.resolve.outputs.result).source }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      name: Resolve the permission from the job and workflow blocks
+      uses: wow-look-at-my/actions@typescript#latest
+      with:
+        script: |
+          type Level = 'none' | 'read' | 'write';
+          const RANK: Record<Level, number> = {none: 0, read: 1, write: 2};
+          const isLevel = (value: unknown): value is Level => typeof value === 'string' && value in RANK;
+
+          const permission = '${{ inputs.permission }}';
+          const want = '${{ inputs.level }}';
+          if (!isLevel(want)) throw new Error(`level is '${want}', not read, write or none`);
+
+          const relative = env.GITHUB_WORKFLOW_REF!.split('@')[0].split('/').slice(2).join('/');
+          const file = path.join(env.GITHUB_WORKSPACE!, relative);
+          if (!fs.existsSync(file)) throw new Error(`${file} does not exist. Check the repository out before this step.`);
+
+          const doc = await $`yq -o=json ${file}`.json<{jobs?: Record<string, {permissions?: unknown}>; permissions?: unknown}>();
+          const job = env.GITHUB_JOB!;
+          if (!doc.jobs?.[job]) throw new Error(`${relative} names no job '${job}'. It has: ${Object.keys(doc.jobs ?? {}).join(', ')}`);
+
+          const levelIn = (block: unknown, where: string): Level | undefined => {
+            if (block === undefined || block === null) return undefined;
+            if (typeof block === 'string') {
+              if (block === 'write-all') return 'write';
+              if (block === 'read-all') return 'read';
+              throw new Error(`${where} permissions is '${block}', which is neither read-all nor write-all`);
+            }
+            if (typeof block !== 'object') throw new Error(`${where} permissions is not a mapping`);
+            const value = (block as Record<string, unknown>)[permission] ?? 'none';
+            if (!isLevel(value)) throw new Error(`${where} permissions.${permission} is '${value}', not read, write or none`);
+            return value;
+          };
+
+          let source = 'job';
+          let level = levelIn(doc.jobs[job].permissions, `job '${job}'`);
+          if (level === undefined) {
+            source = 'workflow';
+            level = levelIn(doc.permissions, 'workflow');
+          }
+          if (level === undefined) {
+            source = 'default';
+            level = 'none';
+          }
+
+          const granted = RANK[level] >= RANK[want];
+          const where = `${relative} job '${job}'`;
+          if (granted) core.info(`${permission}: ${level} is granted to ${where} by its ${source} permissions block`);
+          else {
+            const why = source === 'default'
+              ? `${where} declares no permissions block, so ${permission} falls to the repository default. Declare the block to grant it.`
+              : `${permission}: ${want} is NOT granted to ${where}. Its ${source} permissions block gives ${level}.`;
+            if (${{ inputs.assert == 'true' }}) throw new Error(why);
+            core.warning(why);
+          }
+          return {granted: String(granted), level, source};

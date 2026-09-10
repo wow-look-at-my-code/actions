@@ -1,23 +1,29 @@
 name: YAML Comment Block
-description: Fail CI when a GitHub Actions YAML file in the local call chain carries more than 1 comment line in a row
+description: Fail CI when a GitHub Actions YAML file carries more than 1 comment line in a row
 
 inputs:
   paths:
     description: >-
-      Files to scan, newline or comma separated, relative to the workspace.
-      Leave empty to scan every workflow file and every action.yml in the
-      workspace. Whatever the roots are, the scan follows `uses: ./...` from
-      them through the rest of the local call chain.
+      Paths to read, space separated. A directory is walked for every workflow
+      and every action manifest under it. Defaults to the whole workspace, so
+      the step must run after the checkout.
     required: false
-    default: ''
+    default: '.'
 
   exclude:
     description: >-
-      Glob patterns for files the scan skips, newline or comma separated.
-      Intended for fixtures that violate the rule on purpose.
+      Glob patterns for paths the walk skips, comma separated. Intended for a
+      fixture that breaks the rule on purpose.
     required: false
     default: ''
 
 runs:
-  using: node24
-  main: dist/index.js
+  using: composite
+  steps:
+    # Kept as a name every repository already calls, over the action in slopfix, which owns the rule and the download.
+    - uses: wow-look-at-my/slopfix@master
+      with:
+        command: workflows
+        only: yaml/comment-block
+        paths: ${{ inputs.paths }}
+        exclude: ${{ inputs.exclude }}

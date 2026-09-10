@@ -23,24 +23,17 @@ inputs:
     description: 'Commit message (defaults to "Release {first_tag}")'
     required: false
     default: ''
-  include-branch:
-    description: 'Include branch name in tags for non-main branches'
-    required: false
-    default: 'false'
   cleanup:
-    description: 'Run cleanup mode (delete orphaned branch tags)'
+    description: 'Run cleanup mode (delete stale release tags)'
     required: false
     default: 'false'
 
 runs:
   using: composite
   steps:
-    - name: Cleanup orphaned branch tags
+    - name: Cleanup stale release tags
       if: inputs.cleanup == 'true'
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: "${{ github.action_path }}/orphan-cleanup.sh"
+      uses: wow-look-at-my/actions@tag-cleanup#latest
 
     - name: Create and push orphan tags
       if: inputs.cleanup != 'true'
@@ -57,5 +50,4 @@ runs:
         [ -n "${{ inputs.version }}" ] && args+=(--version "${{ inputs.version }}")
         [ -n "${{ inputs.exclude }}" ] && args+=(--exclude "${{ inputs.exclude }}")
         [ -n "${{ inputs.message }}" ] && args+=(--message "${{ inputs.message }}")
-        [ "${{ inputs.include-branch }}" = "true" ] && args+=(--include-branch)
-        "${{ github.action_path }}/orphan-release.sh" "${args[@]}"
+        node "${{ github.action_path }}/dist/index.js" "${args[@]}"

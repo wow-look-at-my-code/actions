@@ -30,6 +30,21 @@ test('a step allowed to fail is found, and a plain one is not', () => {
 	assert.match(found[0], /uses: wow-look-at-my\/actions@ste-lint#latest/);
 });
 
+// common-checks runs ste-lint, so a caller that lets the wrapper fail lets
+// this check fail with it.
+test('the common-checks step that calls this action counts as this step', () => {
+	const wrapped = `name: CI
+jobs:
+  checks:
+    steps:
+      - uses: wow-look-at-my/actions@common-checks#latest
+        continue-on-error: true
+`;
+	const found = neuteredSteps(wrapped);
+	assert.equal(found.length, 1);
+	assert.match(found[0], /uses: wow-look-at-my\/actions@common-checks#latest/);
+});
+
 test('continue-on-error on a different step is not this step', () => {
 	const other = `name: CI
 jobs:

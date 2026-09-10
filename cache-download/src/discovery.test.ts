@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {ambiguityMessage, distinctHandoffNames} from './discovery';
-import {handoffKey, legacyHandoffKey} from '../../shared/cache-xfer/lib';
+import {handoffKey, legacyHandoffKey} from '../../_shared/cache-xfer/lib';
 
 // Download-only test (NOT part of the shared cache-xfer sources): pins the
 // nameless-discovery semantics — the candidate-name extraction the ambiguity

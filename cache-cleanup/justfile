@@ -10,6 +10,4 @@ help:
 # hide anything. A type error fails `just build` at the tsc step.
 build:
 	pnpm install
-	pnpm tsc
-	pnpm esbuild .tsc-out/cache-cleanup/src/index.js --bundle --platform=node --target=node24 --outfile=dist/index.js
-	rm -rf .tsc-out
+	ts0 build

@@ -1,4 +1,4 @@
-import {KEY_PREFIX, escapeRegExp} from '../../shared/cache-xfer/lib';
+import {KEY_PREFIX, escapeRegExp} from '../../_shared/cache-xfer/lib';
 
 export {KEY_PREFIX};
 

@@ -44,8 +44,8 @@ import * as path from 'path';
 import * as cacheHttpClient from '@actions/cache/lib/internal/cacheHttpClient';
 import {getCacheServiceVersion} from '@actions/cache/lib/internal/config';
 import {internalCacheTwirpClient} from '@actions/cache/lib/internal/shared/cacheTwirpClient';
-import {handoffKey, handoffVersion, validateName} from '../../shared/cache-xfer/lib';
-import {packToFile} from '../../shared/cache-xfer/xfer';
+import {handoffKey, handoffVersion, validateName} from '../../_shared/cache-xfer/lib';
+import {packToFile} from '../../_shared/cache-xfer/xfer';
 
 function requireEnv(name: string): string {
 	const value = process.env[name];

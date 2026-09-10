@@ -4,7 +4,7 @@ description: Run an inline TypeScript script, validated with tsc, with helpful g
 
 inputs:
   script:
-    description: TypeScript source to execute. Top-level `import`/`export`, `await`, and `return <value>` all work, with helpers like `core`, `context`, `octokit`, `fs`, `path` already in scope. Two or more consecutive `//`-only lines fail the step (inline scripts only). Mutually exclusive with `file`.
+    description: TypeScript source to execute. Top-level `import`/`export`, `await`, and `return <value>` all work, with helpers like `core`, `context`, `octokit`, `fs`, `path` already in scope. `require('yaml')` resolves to the bundled parser, so a script reads YAML without a `yq` on PATH. Two or more consecutive `//`-only lines fail the step (inline scripts only). Mutually exclusive with `file`.
     required: false
     default: ''
   file:

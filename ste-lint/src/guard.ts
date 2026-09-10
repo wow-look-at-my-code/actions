@@ -29,7 +29,12 @@ export function workflowPath(ref: string): string | undefined {
 // blocks that carry continue-on-error. A YAML parser is not available here:
 // the runtime is the standard library plus @actions/core, so this reads the
 // step's own indentation instead.
-export function neuteredSteps(workflow: string, marker = 'ste-lint'): string[] {
+// common-checks calls this action, so the caller's own step names the wrapper
+// and not ste-lint. A continue-on-error on that step switches this gate off
+// too, so both names count as this step.
+export const MARKERS = ['ste-lint', 'common-checks'];
+
+export function neuteredSteps(workflow: string, markers: string[] = MARKERS): string[] {
 	const lines = workflow.split('\n');
 	const found: string[] = [];
 	for (let i = 0; i < lines.length; i++) {
@@ -41,7 +46,7 @@ export function neuteredSteps(workflow: string, marker = 'ste-lint'): string[] {
 		for (let j = i; j < lines.length; j++) {
 			const next = /^(\s*)-\s/.exec(lines[j]);
 			if (j > i && next && next[1].length <= indent) break;
-			if (/^\s*-?\s*uses\s*:/.test(lines[j]) && lines[j].includes(marker)) uses = lines[j].trim();
+			if (/^\s*-?\s*uses\s*:/.test(lines[j]) && markers.some((marker) => lines[j].includes(marker))) uses = lines[j].trim();
 			if (/^\s*continue-on-error\s*:\s*true\b/.test(lines[j])) neutered = true;
 		}
 		if (uses && neutered) found.push(`${uses} (line ${i + 1})`);

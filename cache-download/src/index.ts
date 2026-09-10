@@ -59,9 +59,9 @@ import * as cacheHttpClient from '@actions/cache/lib/internal/cacheHttpClient';
 import {getCacheServiceVersion} from '@actions/cache/lib/internal/config';
 import {internalCacheTwirpClient} from '@actions/cache/lib/internal/shared/cacheTwirpClient';
 import {ambiguityMessage, distinctHandoffNames} from './discovery';
-import {handoffKey, handoffRestorePrefix, handoffVersion, legacyHandoffKey, legacyHandoffRestorePrefix, legacyHandoffVersion, nameFromKey, runRestorePrefix, validateName} from '../../shared/cache-xfer/lib';
+import {handoffKey, handoffRestorePrefix, handoffVersion, legacyHandoffKey, legacyHandoffRestorePrefix, legacyHandoffVersion, nameFromKey, runRestorePrefix, validateName} from '../../_shared/cache-xfer/lib';
 import {MissOutcome, missOutcome, namelessMissOutcome} from './miss';
-import {unpackFromFile} from '../../shared/cache-xfer/xfer';
+import {unpackFromFile} from '../../_shared/cache-xfer/xfer';
 
 function requireEnv(name: string): string {
 	const value = process.env[name];

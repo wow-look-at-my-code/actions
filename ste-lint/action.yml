@@ -1,10 +1,10 @@
 name: ste-lint
 version: 1
-description: Check prose against the mechanical subset of ASD-STE100 Simplified Technical English — sentence length measured over whole sentences rather than wrapped lines, contractions, banned modal verbs, semicolons, comma splices, hard-wrapped paragraphs, and dictionary word choice
+description: Check the prose a change touches against the mechanical subset of ASD-STE100 Simplified Technical English — sentence length measured over whole sentences rather than wrapped lines, contractions, banned modal verbs, semicolons, comma splices, hard-wrapped paragraphs, and dictionary word choice
 
 inputs:
   files:
-    description: 'Glob patterns to check, separated by whitespace or commas. Matching nothing is a failure, never a quiet pass.'
+    description: 'Glob patterns to check, separated by whitespace or commas. The scope is then narrowed to the files this event changed. Matching nothing is a failure, never a quiet pass.'
     required: false
     default: '**/*.md'
   hard-max-words:

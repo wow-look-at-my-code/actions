@@ -1,0 +1,17 @@
+name: Tag Cleanup
+version: 1
+description: Delete orphan-release tags whose action, branch, or version no longer exists
+
+inputs:
+  dry-run:
+    description: 'Report stale tags without deleting them'
+    required: false
+    default: 'false'
+
+outputs:
+  deleted-count:
+    description: 'Number of tags deleted (always 0 on a dry run)'
+
+runs:
+  using: node24
+  main: dist/index.js

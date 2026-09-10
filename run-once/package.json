@@ -1,0 +1,11 @@
+{
+  "name": "run-once",
+  "version": "1.0.0",
+  "description": "Claim a workflow run for one job, so the work behind the claim runs once per run",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@actions/cache": "5.2.0",
+    "@actions/core": "^2.0.2"
+  }
+}

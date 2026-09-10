@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {ALREADY_RAN_ENV, GUARDED_NAME, REQUIRED_BUILDS_MANAGER_APP_ID, findCheckRunViolations, findJobViolations, formatViolation, isShadowJobName, scanWorkflowYaml, shouldSkip} from './detect';
+import {ALREADY_RAN_ENV, GUARDED_NAME, REQUIRED_BUILDS_MANAGER_APP_ID, findCheckRunViolations, findJobViolations, formatViolation, isShadowJobName, layerFailureRemedy, scanWorkflowYaml, shouldSkip} from './detect';
+
+test('layerFailureRemedy names a grant only for an authorization failure', () => {
+	for (const status of [401, 403]) {
+		assert.equal(layerFailureRemedy({status}, 'actions: read', "the run's jobs"), "grant 'actions: read' to let this guard scan the run's jobs");
+	}
+	// A 5xx names no grant: a run whose token already carries the permission was
+	// told to grant it, which sent the reader to a correct permissions block.
+	for (const error of [{status: 500}, {status: 502}, {status: 404}, new Error('Server Error'), undefined, null, 'Server Error']) {
+		const remedy = layerFailureRemedy(error, 'actions: read', "the run's jobs");
+		assert.ok(!remedy.includes('grant'), `expected no grant advice for ${JSON.stringify(error)}, got: ${remedy}`);
+		assert.match(remedy, /widening the token fixes nothing/);
+	}
+});
 
 test('pinned constants', () => {
 	assert.equal(GUARDED_NAME, 'all-builds');

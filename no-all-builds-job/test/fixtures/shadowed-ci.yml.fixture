@@ -1,0 +1,10 @@
+# A jobs map carrying the forbidden `all-builds` key. The harness copies it into a throwaway workspace, so the org's own YAML rules never walk it here.
+name: shadowed-fixture
+on:
+  push:
+
+jobs:
+  all-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo this job name fakes the org gate

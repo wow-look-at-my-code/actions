@@ -1,0 +1,10 @@
+{
+	"entry": "src/index.ts",
+	"outfile": "dist/index.js",
+	"target": "node",
+	"format": "cjs",
+	"sourcemap": false,
+	"esbuild": {
+		"packages": "bundle"
+	}
+}

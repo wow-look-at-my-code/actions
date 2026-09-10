@@ -10,7 +10,7 @@ lint:
 
 build:
 	#!/usr/bin/env bash
-	# Compiles src/, bundles via esbuild, then stages the type definitions and
+	# Builds the action with ts0, then stages the type definitions and
 	# TypeScript lib files needed for tsc validation at runtime. Layout:
 	#   dist/index.js               (bundled action)
 	#   dist/lib.es*.d.ts           (TypeScript standard libs)
@@ -19,11 +19,7 @@ build:
 	# bundled tsc actually resolves at runtime — no blanket copies.
 	set -euo pipefail
 	pnpm install
-	pnpm tsc
-	pnpm esbuild dist/index.js --bundle --platform=node --target=node24 --outfile=dist/index.js --allow-overwrite
-	# transform.js/highlight.js are bundled into index.js above; drop the
-	# leftover tsc outputs so they don't ship in the orphan release tag.
-	rm -f dist/transform.js dist/highlight.js
+	ts0 build
 
 	dist="dist"
 	types_root="$dist/types/node_modules"
@@ -52,34 +48,27 @@ build:
 	cp -rL node_modules/@actions/exec "$types_root/@actions/"
 	cp -rL node_modules/@actions/io "$types_root/@actions/"
 
-	# Stripped @actions/github: the real Context + WebhookPayload declarations
-	# plus a hand-rolled lib/github.d.ts mirroring the module's real surface
-	# (`context`, `getOctokit`) with the octokit instance typed loosely — the
-	# real getOctokit signature drags in @octokit/* types (~7 MB).
-	mkdir -p "$types_root/@actions/github/lib"
-	cp node_modules/@actions/github/lib/context.d.ts "$types_root/@actions/github/lib/"
-	cp node_modules/@actions/github/lib/interfaces.d.ts "$types_root/@actions/github/lib/"
-	cat > "$types_root/@actions/github/lib/github.d.ts" <<-'DTS'
-		import { Context } from './context';
-		interface OctokitInstance {
-			rest: any;
-			graphql: any;
-			paginate: any;
-			request: any;
-			hook: any;
-			auth: any;
-			log: { debug: (...args: any[]) => any; info: (...args: any[]) => any; warn: (...args: any[]) => any; error: (...args: any[]) => any };
-		}
-		export declare const context: Context;
-		export declare function getOctokit(token: string, options?: Record<string, any>, ...additionalPlugins: any[]): OctokitInstance;
-	DTS
-	cat > "$types_root/@actions/github/package.json" <<-'JSON'
-		{
-			"name": "@actions/github",
-			"version": "0.0.0-stub",
-			"types": "lib/github.d.ts"
-		}
-	JSON
+	# @actions/github whole, plus the @octokit declaration closure its
+	# getOctokit signature reaches. This is what types `octokit.rest`: each
+	# endpoint takes the arguments that endpoint takes, so a call GitHub has no
+	# route for is a compile error rather than a 404 at run time. A hand-rolled
+	# stub with `rest: any` in its place accepts any call at all, which is the
+	# same as not checking the script.
+	#
+	# pnpm nests these under the dependent, and tsc resolves an import by
+	# walking node_modules up from the importer, so they are flattened into one
+	# staged node_modules rather than mirrored tree by tree.
+	cp -rL node_modules/@actions/github "$types_root/@actions/"
+	rm -rf "$types_root/@actions/github/node_modules"
+	mkdir -p "$types_root/@octokit"
+	for pkg in core types openapi-types plugin-rest-endpoint-methods plugin-paginate-rest graphql request request-error endpoint auth-token; do
+		src=$(find node_modules/.pnpm -maxdepth 4 -type d -path "*/node_modules/@octokit/${pkg}" | head -1)
+		if [ -z "$src" ]; then
+			echo "::error::@octokit/${pkg} not found under node_modules/.pnpm; octokit calls would go unchecked" >&2
+			exit 1
+		fi
+		cp -rL "$src" "$types_root/@octokit/"
+	done
 
 	# Strip everything that isn't a declaration or a license from the staged
 	# packages — JS, source maps, READMEs. Only declarations matter to tsc.

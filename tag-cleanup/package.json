@@ -1,0 +1,11 @@
+{
+  "name": "tag-cleanup",
+  "version": "1.0.0",
+  "description": "Delete orphan-release tags whose action, branch, or version no longer exists",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@actions/core": "^2.0.2",
+    "@actions/exec": "^2.0.0"
+  }
+}

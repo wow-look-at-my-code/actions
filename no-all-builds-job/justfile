@@ -4,8 +4,4 @@ help:
 
 build:
 	pnpm install
-	pnpm tsc
-	pnpm esbuild dist/index.js --bundle --platform=node --target=node24 --outfile=dist/index.js --allow-overwrite
-	# detect is bundled into index.js above; drop the leftover tsc output
-	# so it does not ship in the orphan release tag.
-	rm -f dist/detect.js dist/detect.test.js
+	ts0 build

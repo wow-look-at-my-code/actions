@@ -7,11 +7,5 @@
   "dependencies": {
     "@actions/cache": "5.2.0",
     "@actions/core": "^2.0.2"
-  },
-  "devDependencies": {
-    "@types/node": "^25.0.10",
-    "esbuild": "^0.28.1",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
   }
 }

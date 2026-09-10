@@ -1,0 +1,17 @@
+name: Run Once
+description: Claim a workflow run for one job, so the work behind the claim runs once per run instead of once per job
+
+inputs:
+  name:
+    description: 'Claim name, unique per piece of work (the claim is scoped to this run and attempt)'
+    required: true
+
+outputs:
+  first:
+    description: 'true in the job that holds the claim, false in every other job of this run'
+  key:
+    description: 'Cache key the claim was stored under'
+
+runs:
+  using: node24
+  main: dist/index.js

@@ -1,0 +1,8 @@
+{
+	"entry": ".",
+	"target": "node",
+	"format": "cjs",
+	"declarations": false,
+	"sourcemap": false,
+	"exclude": ["test"]
+}

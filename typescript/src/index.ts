@@ -9,9 +9,11 @@ import * as child_process from 'child_process';
 import * as util from 'util';
 import { createRequire } from 'module';
 import * as ts from 'typescript';
+import * as yaml from 'yaml';
 import { MAIN_FN, transformScript } from './transform';
 import { highlightSource } from './highlight';
 import { CommentBlock, findCommentBlocks } from './comments';
+import { unnamedStepMessage, unnamedSteps, WorkflowDoc } from './step-name';
 
 type ShellArg = string | number | boolean | null | undefined | string[];
 
@@ -26,10 +28,10 @@ type ShellArg = string | number | boolean | null | undefined | string[];
  * `String(stream)` when a primitive is needed for a comparison.
  */
 // eslint-disable-next-line local/no-callable-primitive-intersection -- known: $ output is a boxed branded-primitive (the documented TS footgun); pending the primitive-string redesign
-type OutputStream = string & { json<T = any>(): T };
+type OutputStream = string & { json<T = unknown>(): T };
 
 // eslint-disable-next-line @typescript-eslint/no-wrapper-object-types -- known: $ output is a boxed branded-primitive (the documented TS footgun); pending the primitive-string redesign
-function streamJson<T = any>(this: String): T {
+function streamJson<T = unknown>(this: String): T {
 	return JSON.parse(this.toString()) as T;
 }
 
@@ -106,13 +108,13 @@ class StreamPromise implements PromiseLike<OutputStream> {
 
 	then<T = OutputStream, R = never>(
 		onfulfilled?: ((v: OutputStream) => T | PromiseLike<T>) | null,
-		onrejected?: ((e: any) => R | PromiseLike<R>) | null,
+		onrejected?: ((e: unknown) => R | PromiseLike<R>) | null,
 	): Promise<T | R> {
 		return this.resolve().then(onfulfilled, onrejected);
 	}
 
 	/** Run the command and resolve to this stream parsed as JSON. */
-	json<T = any>(): Promise<T> {
+	json<T = unknown>(): Promise<T> {
 		return this.resolve().then((s) => s.json<T>());
 	}
 
@@ -186,7 +188,7 @@ class ExecBuilder implements PromiseLike<ProcessOutput> {
 	 * Run the command and resolve to its stdout parsed as JSON. A terse stdout
 	 * shortcut equivalent to `.stdout.json()`: `await $`...`.json()`.
 	 */
-	json<T = any>(): Promise<T> {
+	json<T = unknown>(): Promise<T> {
 		return this.stdout.json<T>();
 	}
 
@@ -212,7 +214,7 @@ class ExecBuilder implements PromiseLike<ProcessOutput> {
 
 	then<T = ProcessOutput, R = never>(
 		onfulfilled?: ((v: ProcessOutput) => T | PromiseLike<T>) | null,
-		onrejected?: ((e: any) => R | PromiseLike<R>) | null,
+		onrejected?: ((e: unknown) => R | PromiseLike<R>) | null,
 	): Promise<T | R> {
 		return this.run().then(onfulfilled, onrejected);
 	}
@@ -428,6 +430,17 @@ function baseCompilerOptions(): ts.CompilerOptions {
 	};
 }
 
+// GitHub evaluates every ${{ ... }} expression into the script text before this
+// action runs, so an input read the documented way -- `const a = '${{ inputs.assert }}'`
+// -- reaches tsc as a plain string literal. Every comparison against it is then
+// literal-vs-literal, and TS2367 calls it unintentional because THIS run's value
+// does not match. The value differs per run, and the check cannot tell a
+// substituted literal from a hand-written one, so it is unsound in this action
+// and reports only false positives.
+const SUBSTITUTION_UNSOUND_CODES = new Set([
+	2367, // This comparison appears to be unintentional because the types X and Y have no overlap.
+]);
+
 function typeCheck(source: string): readonly ts.Diagnostic[] {
 	const opts: ts.CompilerOptions = { ...baseCompilerOptions(), noEmit: true };
 
@@ -464,7 +477,7 @@ function typeCheck(source: string): readonly ts.Diagnostic[] {
 		...program.getSyntacticDiagnostics(userFile),
 		...program.getSemanticDiagnostics(userFile),
 		...program.getGlobalDiagnostics(),
-	];
+	].filter((d) => !SUBSTITUTION_UNSOUND_CODES.has(d.code));
 }
 
 // Maps an emitted (transformed) 0-based line back to a 1-based user-script
@@ -520,14 +533,14 @@ async function execute(transpiledJs: string, ctx: WorkflowContexts, baseDir: str
 	// would leave octokit unauthenticated (getOctokit('') throws on first use).
 	let _preAuth: ReturnType<typeof github.getOctokit> | null = null;
 	const octokitProxy = new Proxy(
-		function deprecatedOctokit(token: string, options?: Record<string, unknown>) {
+		function deprecatedOctokit(token: string, options?: Parameters<typeof github.getOctokit>[1]) {
 			core.warning('octokit(token) is deprecated; use the pre-authenticated octokit instance directly, or getOctokit(token) for a custom token');
-			return github.getOctokit(token, options as any);
+			return github.getOctokit(token, options);
 		},
 		{
 			get(_target, prop) {
 				if (!_preAuth) _preAuth = github.getOctokit(githubToken);
-				return (_preAuth as any)[prop];
+				return Reflect.get(_preAuth, prop);
 			},
 		}
 	);
@@ -543,34 +556,48 @@ async function execute(transpiledJs: string, ctx: WorkflowContexts, baseDir: str
 		fs, path, os, child_process, util,
 	});
 
+	// yaml is bundled here, so a script gets it on every runner. Shelling out to
+	// yq instead fails on Windows, which has no yq on PATH.
 	const actionModules: Record<string, unknown> = {
 		'@actions/core': core,
 		'@actions/github': github,
 		'@actions/exec': exec,
 		'@actions/io': io,
+		yaml,
 	};
 
 	const NodeModule = require('module');
 	const origResolve = NodeModule._resolveFilename;
 	const workspaceDir = process.env.GITHUB_WORKSPACE;
 
-	NodeModule._resolveFilename = function (request: string, parent: unknown, isMain: boolean, options: unknown) {
+	// require.resolve() goes through this same hook, so a request nothing can
+	// resolve used to re-enter the fallback until the stack overflowed. The
+	// original resolver is restored across the call, which turns that into the
+	// ordinary "Cannot find module" the caller needs to read.
+	const patched = function (this: unknown, request: string, parent: unknown, isMain: boolean, options: unknown) {
 		if (request in actionModules) return request;
 		try {
 			return origResolve.call(this, request, parent, isMain, options);
 		} catch (e) {
-			if (workspaceDir) {
+			if (!workspaceDir) throw e;
+			NodeModule._resolveFilename = origResolve;
+			try {
 				return createRequire(path.join(workspaceDir, 'noop.js')).resolve(request);
+			} finally {
+				NodeModule._resolveFilename = patched;
 			}
-			throw e;
 		}
 	};
+	NodeModule._resolveFilename = patched;
 
 	for (const [name, mod] of Object.entries(actionModules)) {
-		(require.cache as any)[name] = {
+		// A cache entry the loader only ever reads `exports` off. The rest of
+		// NodeModule is filled in to keep the shape recognizable, so the cast
+		// stands in for the fields nothing here touches.
+		require.cache[name] = {
 			id: name, filename: name, loaded: true, exports: mod,
 			parent: null, children: [], paths: [],
-		};
+		} as unknown as NodeJS.Module;
 	}
 
 	const scriptFilename = path.join(baseDir, `.user-script-${process.pid}-${Date.now()}.js`);
@@ -595,7 +622,7 @@ async function execute(transpiledJs: string, ctx: WorkflowContexts, baseDir: str
 		return await (main as () => Promise<unknown>)();
 	} finally {
 		NodeModule._resolveFilename = origResolve;
-		for (const name of Object.keys(actionModules)) delete (require.cache as any)[name];
+		for (const name of Object.keys(actionModules)) delete require.cache[name];
 	}
 }
 
@@ -622,6 +649,24 @@ function readUserScript(): { script: string; label: string; dir: string; inline:
 	return { script: inline, label: 'script', dir: process.env.GITHUB_WORKSPACE ?? process.cwd(), inline: true };
 }
 
+// Reads the running workflow to find this step and check it carries a `name:`.
+// A step reached through a composite action is not in that file, and neither is
+// anything outside a workflow run, so both cases return no findings.
+async function unnamedStepPositions(): Promise<{workflow: string; job: string; positions: number[]}> {
+	const ref = process.env.GITHUB_WORKFLOW_REF;
+	const job = process.env.GITHUB_JOB;
+	const workspace = process.env.GITHUB_WORKSPACE;
+	const none = {workflow: '', job: job ?? '', positions: []};
+	if (!ref || !job || !workspace) return none;
+
+	const workflow = ref.split('@')[0].split('/').slice(2).join('/');
+	const file = path.join(workspace, workflow);
+	if (!workflow || !fs.existsSync(file)) return none;
+
+	const doc = yaml.parse(fs.readFileSync(file, 'utf-8')) as WorkflowDoc;
+	return {workflow, job, positions: unnamedSteps(doc, job)};
+}
+
 async function run(): Promise<void> {
 	const { script: userScript, label, dir, inline } = readUserScript();
 
@@ -646,6 +691,13 @@ async function run(): Promise<void> {
 	const commentBlocks = inline ? findCommentBlocks(userScript) : [];
 	for (const b of commentBlocks) {
 		core.error(formatCommentBlock(b, label));
+	}
+
+	// Deferred with the comment gate, for the same reason: the script still runs,
+	// so one pass shows everything wrong instead of one error per re-run.
+	const unnamed = await unnamedStepPositions();
+	if (unnamed.positions.length > 0) {
+		core.error(unnamedStepMessage(unnamed.workflow, unnamed.job, unnamed.positions));
 	}
 
 	const { text: source, lineMap } = transformScript(userScript);
@@ -682,6 +734,9 @@ async function run(): Promise<void> {
 	// after the type-check and execution results are already visible.
 	if (commentBlocks.length > 0) {
 		core.setFailed(`Comment check failed: ${commentBlocks.length} block(s) of consecutive \`//\` comment lines.`);
+	}
+	if (unnamed.positions.length > 0) {
+		core.setFailed(`Step name check failed: ${unnamed.positions.length} typescript step(s) in job '${unnamed.job}' carry no \`name:\`.`);
 	}
 }
 
