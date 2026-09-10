@@ -3,11 +3,13 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {test} from 'node:test';
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {Readable} from 'node:stream';
 import {packToFile, pipeIntoStdin, readEnvelope, unpackFromFile} from './xfer';
 
 // Local pack/unpack round-trips (spawns real tar + zstd; no cache service).
+
+const unix = process.platform !== 'win32';
 
 async function tempDir(): Promise<string> {
 	return fsp.mkdtemp(path.join(os.tmpdir(), 'cache-xfer-test-'));
@@ -28,7 +30,10 @@ test('directory round-trip preserves tree, exec bits, symlinks, dotfiles', async
 	await fsp.writeFile(path.join(src, 'sub', 'deep', 'nested.bin'), Buffer.from([0, 1, 2, 254, 255]));
 	await fsp.writeFile(path.join(src, 'tool'), '#!/bin/sh\necho ok\n', {mode: 0o755});
 	await fsp.writeFile(path.join(src, '.hidden'), 'dotfile survives');
-	await fsp.symlink('plain.txt', path.join(src, 'link'));
+	// NT has neither an exec bit nor, for an ordinary user, a symlink.
+	if (unix) {
+		await fsp.symlink('plain.txt', path.join(src, 'link'));
+	}
 
 	const archive = path.join(work, 'archive.wxfr');
 	const packed = await packToFile(src, archive, 'tree-handoff');
@@ -45,9 +50,11 @@ test('directory round-trip preserves tree, exec bits, symlinks, dotfiles', async
 	assert.equal(await fsp.readFile(path.join(dest, 'plain.txt'), 'utf8'), 'hello handoff');
 	assert.deepEqual(await fsp.readFile(path.join(dest, 'sub', 'deep', 'nested.bin')), Buffer.from([0, 1, 2, 254, 255]));
 	assert.equal(await fsp.readFile(path.join(dest, '.hidden'), 'utf8'), 'dotfile survives');
-	const toolMode = (await fsp.stat(path.join(dest, 'tool'))).mode & 0o777;
-	assert.equal(toolMode & 0o111, 0o111, `exec bits survive (got ${toolMode.toString(8)})`);
-	assert.equal(await fsp.readlink(path.join(dest, 'link')), 'plain.txt');
+	if (unix) {
+		const toolMode = (await fsp.stat(path.join(dest, 'tool'))).mode & 0o777;
+		assert.equal(toolMode & 0o111, 0o111, `exec bits survive (got ${toolMode.toString(8)})`);
+		assert.equal(await fsp.readlink(path.join(dest, 'link')), 'plain.txt');
+	}
 });
 
 test('single-file round-trip uses raw mode and restores basename + mode', async t => {
@@ -69,13 +76,17 @@ test('single-file round-trip uses raw mode and restores basename + mode', async 
 	assert.equal(packed.mode, 'raw');
 	assert.equal(packed.name, 'toolchain');
 	assert.equal(packed.basename, 'go-toolchain');
-	assert.equal((packed.fileMode as number) & 0o111, 0o111);
+	if (unix) {
+		assert.equal((packed.fileMode as number) & 0o111, 0o111);
+	}
 
 	const unpacked = await unpackFromFile(archive, dest);
 	assert.equal(unpacked.mode, 'raw');
 	const restored = path.join(dest, 'go-toolchain');
 	assert.deepEqual(await fsp.readFile(restored), body);
-	assert.equal((await fsp.stat(restored)).mode & 0o111, 0o111);
+	if (unix) {
+		assert.equal((await fsp.stat(restored)).mode & 0o111, 0o111);
+	}
 });
 
 test('packToFile rejects a missing path', async () => {
@@ -150,7 +161,21 @@ test('repeated directory round-trips neither fail nor lose bytes', async t => {
 	}
 });
 
-test('a win32-origin archive restores every file executable on unix', {skip: process.platform === 'win32'}, async t => {
+test('a unix-origin archive restores a file NT runs by its extension', {skip: unix}, async t => {
+	const base = await tempDir();
+	t.after(() => fsp.rm(base, {recursive: true, force: true}));
+	await fsp.mkdir(path.join(base, 'out'));
+	await fsp.writeFile(path.join(base, 'out', 'hello.cmd'), '@echo restored\r\n');
+	const archive = path.join(base, 'handoff.wxfr');
+	await packToFile(path.join(base, 'out'), archive, 'ape-binary-Linux', 'linux');
+	const dest = path.join(base, 'dest');
+	await unpackFromFile(archive, dest);
+	const run = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/c', path.join(dest, 'hello.cmd')], {encoding: 'utf8'});
+	assert.equal(run.status, 0, run.stderr);
+	assert.equal(run.stdout.trim(), 'restored');
+});
+
+test('a win32-origin archive restores every file executable on unix', {skip: !unix}, async t => {
 	const base = await tempDir();
 	t.after(() => fsp.rm(base, {recursive: true, force: true}));
 	await fsp.mkdir(path.join(base, 'out', 'sub'), {recursive: true});

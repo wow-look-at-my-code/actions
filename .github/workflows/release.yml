@@ -129,6 +129,25 @@ jobs:
       - name: Assert cleanup deleted both hand-offs
         run: test "${{ steps.cleanup.outputs.deleted-count }}" -ge 2
 
+  # The shared cache-xfer tests on NT: its tar and path handling, and that a unix-origin hand-off runs there.
+  cache-xfer-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Download ts0
+        id: ts0
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
+        with:
+          project: ts0
+      - name: Shared cache-xfer unit tests
+        working-directory: _shared/cache-xfer
+        env:
+          TS0: ${{ steps.ts0.outputs.path }}
+        run: node $env:TS0 test
+
   validate:
     runs-on: ubuntu-latest
     steps:
