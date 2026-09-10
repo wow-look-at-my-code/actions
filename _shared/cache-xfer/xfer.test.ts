@@ -170,8 +170,10 @@ test('a unix-origin archive restores a file NT runs by its extension', {skip: un
 	await packToFile(path.join(base, 'out'), archive, 'ape-binary-Linux', 'linux');
 	const dest = path.join(base, 'dest');
 	await unpackFromFile(archive, dest);
-	const run = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/c', path.join(dest, 'hello.cmd')], {encoding: 'utf8'});
-	assert.equal(run.status, 0, run.stderr);
+	const restored = path.join(dest, 'hello.cmd');
+	assert.ok(await fsp.stat(restored).then(s => s.isFile(), () => false), `hello.cmd was not restored; dest holds ${JSON.stringify(await fsp.readdir(dest).catch(() => 'nothing'))}`);
+	const run = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/c', `"${restored}"`], {encoding: 'utf8', windowsVerbatimArguments: true});
+	assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
 	assert.equal(run.stdout.trim(), 'restored');
 });
 

@@ -45,8 +45,10 @@ async function waitExit(proc: ChildProcess, name: string, stderr: {read: () => s
  *   ECANCELED                  — writes were still queued when the pipe was
  *                                torn down, so the runtime cancelled them
  *   ERR_STREAM_DESTROYED       — a write was issued after the teardown
+ *   EOF                        — NT's spelling of EPIPE: a write reached a
+ *                                pipe the child had closed
  */
-const STDIN_TEARDOWN_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'EPIPE', 'ECANCELED', 'ERR_STREAM_DESTROYED']);
+const STDIN_TEARDOWN_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'EPIPE', 'ECANCELED', 'ERR_STREAM_DESTROYED', 'EOF']);
 
 /**
  * Feed `source` into a child's stdin.
