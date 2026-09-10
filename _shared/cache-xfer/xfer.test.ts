@@ -172,8 +172,17 @@ test('a unix-origin archive restores a file NT runs by its extension', {skip: un
 	const dest = path.join(base, 'dest');
 	await unpackFromFile(archive, dest);
 	const restored = path.join(dest, 'hello.cmd');
-	const tarVersion = spawnSync('tar', ['--version'], {encoding: 'utf8'}).stdout.split('\n')[0];
-	assert.ok(await fsp.stat(restored).then(s => s.isFile(), () => false), `hello.cmd was not restored; dest holds ${JSON.stringify(await fsp.readdir(dest).catch(() => 'nothing'))}; archive ${(await fsp.stat(archive)).size} bytes; ${tarVersion}`);
+	if (!(await fsp.stat(restored).then(s => s.isFile(), () => false))) {
+		// Which side lost the files: list the archive's own entries.
+		const {dataOffset} = await readEnvelope(archive);
+		const payload = (await fsp.readFile(archive)).subarray(dataOffset);
+		const plainTar = path.join(base, 'payload.tar');
+		const unzstd = spawnSync('zstd', ['-d', '-c'], {input: payload});
+		await fsp.writeFile(plainTar, unzstd.stdout);
+		const listing = spawnSync('tar', ['-tvf', plainTar], {encoding: 'utf8'});
+		const tarVersion = spawnSync('tar', ['--version'], {encoding: 'utf8'}).stdout.split('\n')[0];
+		assert.fail(`hello.cmd was not restored; dest holds ${JSON.stringify(await fsp.readdir(dest).catch(() => 'nothing'))}; archive ${(await fsp.stat(archive)).size} bytes, tar payload ${unzstd.stdout.length} bytes listing:\n${listing.stdout}${listing.stderr}\n${tarVersion}`);
+	}
 	const run = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/c', `"${restored}"`], {encoding: 'utf8', windowsVerbatimArguments: true});
 	assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
 	assert.equal(run.stdout.trim(), 'restored');
