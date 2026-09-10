@@ -152,6 +152,8 @@ export interface EnvelopeHeader {
 	name?: string;
 	basename?: string;
 	fileMode?: number;
+	/** process.platform of the producer. A win32 archive carries no exec bits, so a unix consumer sets them on every file. */
+	producer?: string;
 }
 
 export function encodeEnvelope(header: EnvelopeHeader): Buffer {
