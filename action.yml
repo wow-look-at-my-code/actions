@@ -1,0 +1,19 @@
+name: Cache Upload
+version: 1
+description: Hand a file or directory to later jobs in the same workflow run via the actions cache (artifact-free replacement for actions/upload-artifact)
+
+inputs:
+  name:
+    description: 'Hand-off name, unique within the workflow run (like an artifact name)'
+    required: true
+  path:
+    description: 'File or directory to hand off (a directory is captured as its contents)'
+    required: true
+
+outputs:
+  key:
+    description: 'Cache key the hand-off was saved under'
+
+runs:
+  using: node24
+  main: dist/index.js
