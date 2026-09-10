@@ -1,7 +1,7 @@
 name: Setup and Build
 description: >-
-  Internal CI helper for release.yml: installs the Node/pnpm/just toolchain the
-  repo's node24 actions build with, then optionally runs `just build` in one
+  Internal CI helper for release.yml: installs the Node/pnpm/just/ts0 toolchain
+  the repo's node24 actions build with, then optionally runs `just build` in one
   action directory. Not a released action: release.yml's detect job excludes
   ./.github/*, so this never gets an orphan tag. Checkout is deliberately NOT
   part of this composite -- a local `uses: ./.github/actions/...` reference
@@ -26,6 +26,20 @@ runs:
       with:
         version: latest
     - uses: extractions/setup-just@v2
+    - name: Download ts0
+      id: ts0
+      uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
+      with:
+        project: ts0
+    # Standard paths, not the runner temp the download lands in: a sandboxed step mounts only these.
+    - name: Put ts0 on PATH
+      shell: bash
+      env:
+        TS0_CJS: ${{ steps.ts0.outputs.path }}
+      run: |
+        sudo install -m 0644 "$TS0_CJS" /usr/local/lib/ts0.cjs
+        printf '#!/bin/sh\nexec node /usr/local/lib/ts0.cjs "$@"\n' > "$RUNNER_TEMP/ts0.shim"
+        sudo install -m 0755 "$RUNNER_TEMP/ts0.shim" /usr/local/bin/ts0
     - name: Build
       if: inputs.action-dir != ''
       working-directory: ${{ inputs.action-dir }}

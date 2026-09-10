@@ -138,6 +138,17 @@ export function scanWorkflowYaml(file: string, content: string): WorkflowFileVio
 	return violations;
 }
 
+// What to tell the reader when a scanning layer could not run. Only a 401 or a
+// 403 is fixed by widening the token, so naming a grant for any other status
+// sends the reader to a permissions block that is already correct.
+export function layerFailureRemedy(error: unknown, grant: string, subject: string): string {
+	const status = typeof error === 'object' && error !== null ? (error as {status?: unknown}).status : undefined;
+	if (status === 401 || status === 403) {
+		return `grant '${grant}' to let this guard scan ${subject}`;
+	}
+	return `not an authorization failure — widening the token fixes nothing; re-run once the API answers again`;
+}
+
 // The per-finding message. The blunt wording is operator-mandated — do not
 // soften it: name the job, state that the name is a known deception attempt,
 // that it does not satisfy the gate (the required check is the

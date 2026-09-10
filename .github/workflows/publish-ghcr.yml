@@ -47,10 +47,7 @@ jobs:
   publish-ghcr:
     runs-on: ubuntu-latest
     permissions:
-      # Needed by actions/checkout to clone PRIVATE caller repos. Public
-      # repos clone without it, which is why this was previously omitted;
-      # private callers got "Repository not found" on checkout.
-      contents: read
+      contents: read # a private caller repo cannot be checked out without it
       packages: write
       actions: read
     steps:

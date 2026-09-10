@@ -1,0 +1,13 @@
+name: Install timeout (macOS)
+version: 1
+description: Makes GNU timeout available on macOS runners by installing coreutils via Homebrew
+
+runs:
+  using: composite
+  steps:
+    - name: Install coreutils
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install coreutils
+        echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"

@@ -1,0 +1,10 @@
+{
+  "name": "no-tests-in-yaml",
+  "version": "1.0.0",
+  "description": "Fail CI when a GitHub Actions YAML file carries a test instead of invoking the repository's own suite",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@actions/core": "^2.0.2"
+  }
+}

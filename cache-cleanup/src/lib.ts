@@ -1,9 +1,6 @@
-/** Key prefix shared with cache-upload / cache-download (pinned by tests). */
-export const KEY_PREFIX = 'cache-xfer';
+import {KEY_PREFIX, escapeRegExp} from '../../_shared/cache-xfer/lib';
 
-function escapeRegExp(s: string): string {
-	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+export {KEY_PREFIX};
 
 /**
  * REST list prefix: always the whole cache-xfer namespace. The current

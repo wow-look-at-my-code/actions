@@ -305,6 +305,29 @@ async function run(): Promise<void> {
   core.info(`Pruned ${deleted}/${totalToDelete} version(s)`);
 }
 
+// A GitHub API rate limit (HTTP 403 or 429 whose message mentions the rate
+// limit — octokit's RequestError carries .status and .message) must not fail
+// the job: this step trails an already-successful image publish, and pruning
+// is housekeeping that self-heals on the next run. Every other error stays
+// fatal.
+function isRateLimitError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { status, message } = error as { status?: unknown; message?: unknown };
+  return (
+    (status === 403 || status === 429) &&
+    typeof message === "string" &&
+    /rate limit/i.test(message)
+  );
+}
+
 run().catch((error) => {
+  if (isRateLimitError(error)) {
+    core.warning(
+      `Skipping prune of ${core.getInput("image")}: GitHub API rate limit hit (${
+        (error as { message: string }).message
+      }). Old versions were left in place; the next run will prune them.`
+    );
+    return;
+  }
   core.setFailed(error instanceof Error ? error.message : String(error));
 });

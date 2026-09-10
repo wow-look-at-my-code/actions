@@ -25,19 +25,10 @@ inputs:
 runs:
   using: composite
   steps:
-    # Fetch Cloudflare credentials from secret-server (OIDC - no GitHub
-    # Actions secrets anywhere; the caller must grant
-    # `permissions: id-token: write`). Entitlement is configured server-side;
-    # an unentitled identity gets 200 + {} and simply exports nothing, which
-    # the deploy step below handles per the missing-credentials input.
+    # Needs `id-token: write`. see cloudflare-pages/README.md
     - uses: wow-look-at-my/actions@secret-server#latest
 
-    # Direct upload to Cloudflare Pages. While secret-server provides no
-    # CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID, the default is a loud
-    # green no-op (warning annotation + step summary) so a missing
-    # entitlement never turns the caller red; set missing-credentials to
-    # 'fail' to make it red instead. Once entitled, real deploy failures
-    # are always red.
+    # see cloudflare-pages/README.md for the no-credentials behaviour
     - name: Deploy to Cloudflare Pages
       uses: wow-look-at-my/actions@typescript#latest
       with:

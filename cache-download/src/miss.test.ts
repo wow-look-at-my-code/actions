@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import {test} from 'node:test';
 import {missOutcome, namelessMissOutcome} from './miss';
 
-// Download-only test (NOT one of the byte-identical shared files): pins the
+// Download-only test (NOT part of the shared cache-xfer sources): pins the
 // fail-if-missing semantics. The action.yml default is 'true', so an unset
 // input means a missing hand-off hard-fails the step; only an explicit
 // 'false' continues.

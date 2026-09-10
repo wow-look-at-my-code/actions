@@ -1,4 +1,4 @@
-// Download-only module (NOT one of the byte-identical files shared with
+// Download-only module (NOT part of the shared cache-xfer sources used by
 // cache-upload): decides what happens when the hand-off lookup misses.
 
 /** What a hand-off lookup miss does to the step. */

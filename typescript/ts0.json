@@ -1,0 +1,9 @@
+{
+	"entry": "src/index.ts",
+	"outfile": "dist/index.js",
+	"target": "node",
+	"format": "cjs",
+	"bundleDependencies": true,
+	"sourcemap": false,
+	"exclude": ["test"]
+}

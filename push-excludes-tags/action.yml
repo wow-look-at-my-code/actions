@@ -1,0 +1,62 @@
+name: Push Excludes Tags
+description: Fail CI when a workflow's push trigger names no ref filter, so tag pushes start it again
+
+runs:
+  using: composite
+  steps:
+    - name: Check every workflow's push trigger for a ref filter
+      uses: wow-look-at-my/actions@typescript#latest
+      with:
+        script: |
+          const FILTERS = ['branches', 'branches-ignore', 'tags', 'tags-ignore'];
+          // A workflow's `on:` is a string, a list of event names, or a map from event to its filters.
+          type On = string | string[] | {push?: Record<string, unknown> | null} | null;
+          const dir = path.join(env.GITHUB_WORKSPACE!, '.github', 'workflows');
+          if (!fs.existsSync(dir)) {
+            core.warning(`no ${dir}, so this run enforced nothing. Check the repo out first.`);
+            return;
+          }
+          const names = fs.readdirSync(dir).filter(name => /\.ya?ml$/.test(name)).sort();
+          if (names.length === 0) {
+            core.warning(`no workflow file under ${dir}, so this run enforced nothing.`);
+            return;
+          }
+          // This action runs in every consumer repo, on whatever typescript action is published. A `require` of a module that action bundles today fails on an older one, so the trigger is read here with no module at all.
+          const indentOf = (line: string): number => line.length - line.trimStart().length;
+          const skip = (line: string): boolean => line.trim() === '' || line.trimStart().startsWith('#');
+          const strip = (value: string): string => value.replace(/\s+#.*$/, '').trim();
+          const key = (line: string, name: string): RegExpExecArray | null =>
+            new RegExp(`^\\s*(?:${name}|"${name}"|'${name}')\\s*:(.*)$`).exec(line);
+          const unfilteredPush = (text: string): boolean => {
+            const lines = text.split('\n');
+            let at = lines.findIndex(line => indentOf(line) === 0 && key(line, 'on'));
+            if (at < 0) return false;
+            const head = strip(key(lines[at], 'on')![1]);
+            if (head === 'push') return true;
+            if (head.startsWith('[')) return head.slice(1).replace(/].*$/, '').split(',').some(item => strip(item).replace(/['"]/g, '') === 'push');
+            if (head !== '') return false;
+            let push = -1;
+            for (at++; at < lines.length; at++) {
+              if (skip(lines[at])) continue;
+              if (indentOf(lines[at]) === 0) return false;
+              if (key(lines[at], 'push')) { push = at; break; }
+            }
+            if (push < 0) return false;
+            const inline = strip(key(lines[push], 'push')![1]);
+            if (inline !== '') return !FILTERS.some(name => inline.includes(`${name}:`));
+            for (at = push + 1; at < lines.length; at++) {
+              if (skip(lines[at])) continue;
+              if (indentOf(lines[at]) <= indentOf(lines[push])) break;
+              if (FILTERS.some(name => key(lines[at], name))) return false;
+            }
+            return true;
+          };
+          let found = 0;
+          for (const name of names) {
+            const file = `.github/workflows/${name}`;
+            if (!unfilteredPush(fs.readFileSync(path.join(dir, name), 'utf-8'))) continue;
+            found++;
+            core.error(`${file}: its push trigger names no ref filter, so every tag push starts this workflow again. Add \`branches: ['**']\` under \`push:\` (or \`tags-ignore: ['**']\`) to keep it on branch pushes.`, {file});
+          }
+          if (found > 0) core.setFailed(`${found} of ${names.length} workflow(s) still match tag pushes`);
+          else core.info(`OK - every push trigger names a ref filter in ${names.length} file(s)`);

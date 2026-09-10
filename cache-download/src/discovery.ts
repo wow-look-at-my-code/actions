@@ -1,4 +1,4 @@
-// Download-only module (NOT one of the byte-identical files shared with
+// Download-only module (NOT part of the shared cache-xfer sources used by
 // cache-upload): nameless discovery — turning "the hand-offs this run
 // saved" into a single unambiguous pick, or a loud refusal.
 //
@@ -13,7 +13,7 @@
 // is restored — which is why multi-producer runs must keep explicit names
 // (see action.yml / README).
 
-import {nameFromKey} from './lib';
+import {nameFromKey} from '../../_shared/cache-xfer/lib';
 
 /**
  * Distinct current-layout hand-off names among the listed keys of run

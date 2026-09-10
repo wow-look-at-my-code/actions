@@ -1,0 +1,42 @@
+name: Test no-all-builds-job
+version: 1
+description: Dogfood the all-builds guard against this repo, the shadowed fixture, and an unusable token (never released)
+
+runs:
+  using: composite
+  steps:
+    - name: Guard passes on this repo
+      uses: ./no-all-builds-job
+
+    # A step `env:` cannot override GITHUB_*. see docs/release-workflow.md
+    - name: Guard must fail on the shadowed fixture (file-scan layer)
+      id: shadowed
+      continue-on-error: true
+      shell: bash
+      run: |
+        w=$(mktemp -d); mkdir -p "$w/.github/workflows"
+        cp no-all-builds-job/test/fixtures/shadowed-ci.yml.fixture "$w/.github/workflows/ci.yml"
+        NO_ALL_BUILDS_JOB_ALREADY_RAN= GITHUB_WORKSPACE="$w" INPUT_TOKEN= node no-all-builds-job/dist/index.js
+
+    - name: Assert the shadowed fixture failed the guard
+      shell: bash
+      run: test "${{ steps.shadowed.outcome }}" = "failure"
+
+    # A layer that cannot scan is a blocking error. see docs/release-workflow.md
+    - name: Guard must fail when the API layers cannot run
+      id: layers
+      continue-on-error: true
+      shell: bash
+      run: NO_ALL_BUILDS_JOB_ALREADY_RAN= INPUT_TOKEN=x node no-all-builds-job/dist/index.js
+
+    - name: Assert the unrunnable API layers failed the guard
+      shell: bash
+      run: test "${{ steps.layers.outcome }}" = "failure"
+
+    # The sentinel skips the guard before any check runs.
+    - name: Guard skips when the run-once sentinel is set
+      shell: bash
+      run: |
+        w=$(mktemp -d); mkdir -p "$w/.github/workflows"
+        cp no-all-builds-job/test/fixtures/shadowed-ci.yml.fixture "$w/.github/workflows/ci.yml"
+        NO_ALL_BUILDS_JOB_ALREADY_RAN=1 GITHUB_WORKSPACE="$w" INPUT_TOKEN=x node no-all-builds-job/dist/index.js

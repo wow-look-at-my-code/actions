@@ -2,10 +2,12 @@
 help:
 	@just --list
 
+# tsc is the only thing that ever reads TypeScript: it type-checks and emits
+# JavaScript into .tsc-out (rootDir is the repo root, so sources imported from
+# shared/ land beside this action's). esbuild then bundles that JavaScript into
+# the single self-contained dist/index.js the release tag ships -- it is a
+# bundler here, never a second compiler, so esbuild not type-checking cannot
+# hide anything. A type error fails `just build` at the tsc step.
 build:
 	pnpm install
-	pnpm tsc
-	pnpm esbuild dist/index.js --bundle --platform=node --target=node24 --outfile=dist/index.js --allow-overwrite
-	# lib is bundled into index.js above; drop the leftover tsc output
-	# so it does not ship in the orphan release tag.
-	rm -f dist/lib.js dist/lib.test.js
+	ts0 build

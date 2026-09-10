@@ -10,10 +10,20 @@ const execFileAsync = promisify(execFile);
 const DIST = path.join(__dirname, '..', 'dist', 'index.js');
 
 interface RunResult {
+	/** Process stdout with the echoed script source removed. */
 	stdout: string;
+	/** Full process stdout, source echo included. */
+	rawStdout: string;
 	stderr: string;
 	exitCode: number;
 }
+
+// The action opens the "Compiling script" group by echoing the (highlighted)
+// script source. Strip just that echo from `stdout` so assertions about what
+// actually executed aren't satisfied by the mere echo of the script text;
+// `rawStdout` keeps it. The rest of the group (the type-check/transpile lines
+// and any ::error:: diagnostics) stays -- tests assert on those.
+const SOURCE_ECHO = /^::group::Compiling script\n[\s\S]*?(?=^Type-check passed\.$|^::error::)/m;
 
 async function runAction(script: string, env: Record<string, string> = {}): Promise<RunResult> {
 	try {
@@ -21,9 +31,13 @@ async function runAction(script: string, env: Record<string, string> = {}): Prom
 			env: { ...process.env, INPUT_SCRIPT: script, ...env },
 			timeout: 15000,
 		});
-		return { stdout, stderr, exitCode: 0 };
-	} catch (err: any) {
-		return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', exitCode: err.code ?? 1 };
+		return { stdout: stdout.replace(SOURCE_ECHO, ''), rawStdout: stdout, stderr, exitCode: 0 };
+	} catch (err: unknown) {
+		// execFile rejects with an Error carrying the captured streams and the
+		// exit code, which no Node type declares.
+		const failure = err as { stdout?: string; stderr?: string; code?: number };
+		const stdout: string = failure.stdout ?? '';
+		return { stdout: stdout.replace(SOURCE_ECHO, ''), rawStdout: stdout, stderr: failure.stderr ?? '', exitCode: failure.code ?? 1 };
 	}
 }
 
@@ -63,6 +77,61 @@ describe('typescript action', () => {
 		const { stdout, exitCode } = await runAction('core.info("hello world")');
 		assert.equal(exitCode, 0);
 		assert.ok(stdout.includes('hello world'));
+	});
+
+	it('echoes the ANSI-highlighted script source in the single compile group', async () => {
+		const { rawStdout, exitCode } = await runAction('const n = 1; // note');
+		assert.equal(exitCode, 0);
+		const echo = rawStdout.match(SOURCE_ECHO)?.[0];
+		assert.ok(echo, `source echo missing in:\n${rawStdout}`);
+		assert.ok(echo.includes('\x1b[38;2;255;123;114mconst\x1b[39m'), `keyword not highlighted in:\n${JSON.stringify(echo)}`);
+		assert.ok(echo.includes('\x1b[38;2;139;148;158m// note\x1b[39m'), `comment not highlighted in:\n${JSON.stringify(echo)}`);
+		// Source echo, type-check and transpile share one group, in that order,
+		// and the split-out groups they replaced are gone for good.
+		assert.ok(
+			rawStdout.indexOf('::group::Compiling script') < rawStdout.indexOf('Type-check passed.')
+				&& rawStdout.indexOf('Type-check passed.') < rawStdout.indexOf('Transpiled output:')
+				&& rawStdout.indexOf('Transpiled output:') < rawStdout.indexOf('::endgroup::'),
+			rawStdout,
+		);
+		assert.equal(rawStdout.match(/^::group::/gm)?.length, 2, `expected exactly 2 log groups in:\n${rawStdout}`);
+		for (const gone of ['::group::Script source', '::group::Type-checking', '::group::Transpiling']) {
+			assert.ok(!rawStdout.includes(gone), `${gone} should no longer exist:\n${rawStdout}`);
+		}
+	});
+
+	it('does not know DOM types by default', async () => {
+		const { stdout, exitCode } = await runAction('const el: Element | null = null; core.info(String(el));');
+		assert.equal(exitCode, 1);
+		assert.ok(stdout.includes("Cannot find name 'Element'"), stdout);
+	});
+
+	it('type-checks against the DOM library when dom is true', async () => {
+		const { stdout, exitCode } = await runAction(
+			'const el: Element | null = null; core.info("dom-ok:" + String(el));',
+			{ INPUT_DOM: 'true' },
+		);
+		assert.equal(exitCode, 0, stdout);
+		assert.ok(stdout.includes('dom-ok:null'), stdout);
+	});
+
+	it('keeps Node globals working with dom enabled', async () => {
+		// lib.dom redeclares names @types/node also declares -- setTimeout,
+		// fetch, URL. A conflict here would break every ordinary script that
+		// turns the input on.
+		const { stdout, exitCode } = await runAction(
+			`const t = setTimeout(() => {}, 1); clearTimeout(t);
+			const u = new URL("https://example.com/x"); core.info("both-ok:" + u.pathname + ":" + process.pid.toString().length);`,
+			{ INPUT_DOM: 'true' },
+		);
+		assert.equal(exitCode, 0, stdout);
+		assert.ok(stdout.includes('both-ok:/x:'), stdout);
+	});
+
+	it('rejects a dom input that is neither true nor false', async () => {
+		const { stdout, stderr, exitCode } = await runAction('core.info("x")', { INPUT_DOM: 'yes' });
+		assert.equal(exitCode, 1);
+		assert.ok((stdout + stderr).includes("Input 'dom' must be 'true' or 'false'"), stdout + stderr);
 	});
 
 	it('supports top-level await', async () => {
@@ -153,6 +222,32 @@ describe('typescript action', () => {
 		assert.ok(stdout.includes('path:a/b') || stdout.includes('path:a\\b'));
 	});
 
+	// Bundled here rather than resolved from the caller's workspace, so a guard
+	// can read YAML on a Windows runner, which carries no yq.
+	it('supports require of the bundled yaml module', async () => {
+		const { stdout, exitCode } = await runAction(`
+			const yaml = require("yaml");
+			const doc = yaml.parse("on:\\n  push:\\n    branches: ['**']\\n");
+			core.info("branches:" + JSON.stringify(doc["on"].push.branches));
+		`);
+		assert.equal(exitCode, 0);
+		assert.ok(stdout.includes('branches:["**"]'), stdout);
+	});
+
+	it('names a module it cannot resolve instead of overflowing the stack', async () => {
+		const { stdout, exitCode } = await runAction(`
+			try {
+				require("no-such-module-anywhere");
+				core.info("resolved:unexpected");
+			} catch (e) {
+				core.info("threw:" + (e instanceof Error ? e.message : String(e)));
+			}
+		`);
+		assert.equal(exitCode, 0);
+		assert.ok(!stdout.includes('Maximum call stack'), stdout);
+		assert.ok(stdout.includes('no-such-module-anywhere'), stdout);
+	});
+
 	it('supports multiple awaits', async () => {
 		const { stdout, exitCode } = await runAction(`
 			const a = await Promise.resolve(1);
@@ -178,6 +273,72 @@ describe('typescript action', () => {
 		);
 		assert.notEqual(exitCode, 0);
 		assert.ok(stdout.includes('TypeScript validation failed'));
+	});
+
+	it('accepts a comparison against an interpolated input, which reaches tsc as a literal (TS2367)', async () => {
+		// What the action receives once GitHub has evaluated `'${{ inputs.assert }}'`
+		// in a caller's script. The comparison is meaningful across runs; tsc sees
+		// only this run's value and would call it always-false.
+		const { stdout, exitCode } = await runAction(
+			"const assert = 'false';\nif (assert === 'true') core.info('asserted');\ncore.info('ran');"
+		);
+		assert.equal(exitCode, 0, stdout);
+		assert.ok(stdout.includes('Type-check passed.'), stdout);
+		assert.ok(stdout.includes('ran'), stdout);
+		assert.ok(!stdout.includes('asserted'), `the false branch must not run:\n${stdout}`);
+	});
+
+	it('fails on two consecutive `//` comment lines, but lets the step run to completion first', async () => {
+		const { stdout, exitCode } = await runAction(
+			'core.info("line one");\n// first\n// second\ncore.info("ran");'
+		);
+		assert.notEqual(exitCode, 0);
+		assert.ok(stdout.includes('script:2:1:'), `expected the block reported at line 2, got:\n${stdout}`);
+		assert.ok(stdout.includes('consecutive `//` comment lines (2-3)'), stdout);
+		// The count alone reads as a threshold: a two-line block reported as "2
+		// consecutive" invites shortening rather than collapsing, so the message
+		// must also state the real limit.
+		assert.ok(
+			stdout.includes('The limit is ONE'),
+			`the message must name the limit, not just the count:\n${stdout}`
+		);
+		assert.ok(stdout.includes('Type-check passed.'), `type-check must still run:\n${stdout}`);
+		assert.ok(stdout.includes('ran'), `script must still execute:\n${stdout}`);
+		assert.ok(stdout.includes('Comment check failed'), stdout);
+		// the deferred failure message comes after the step actually ran
+		assert.ok(stdout.indexOf('ran') < stdout.indexOf('Comment check failed'), stdout);
+	});
+
+	it('still fails immediately on a type error, even alongside a comment-block violation', async () => {
+		const { stdout, exitCode } = await runAction(
+			'// first\n// second\nconst x: number = "not a number";\ncore.info("ran");'
+		);
+		assert.notEqual(exitCode, 0);
+		assert.ok(stdout.includes('TypeScript validation failed'), stdout);
+		assert.ok(!stdout.includes('ran'), `a type error must still block execution:\n${stdout}`);
+	});
+
+	it('exempts a file input from the comment check', async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-action-test-'));
+		fs.writeFileSync(
+			path.join(dir, 'script.ts'),
+			['// a checked-in script may explain itself', '// across as many lines as it needs', 'core.info("from-file");'].join('\n')
+		);
+		try {
+			const { exitCode, stdout } = await runAction('', { INPUT_FILE: 'script.ts', GITHUB_WORKSPACE: dir });
+			assert.equal(exitCode, 0, stdout);
+			assert.ok(stdout.includes('from-file'));
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('accepts single comment lines and trailing comments', async () => {
+		const { stdout, exitCode } = await runAction(
+			'// a lone comment\nconst a = 1; // trailing\nconst b = 2; // trailing\ncore.info("sum:" + (a + b));'
+		);
+		assert.equal(exitCode, 0, stdout);
+		assert.ok(stdout.includes('sum:3'));
 	});
 
 	it('maps type-error line numbers back to the user script', async () => {
@@ -448,7 +609,7 @@ describe('$ command runner', () => {
 			const payload = JSON.stringify({ a: 1, b: ["x", "y"] });
 			const code = "process.stdout.write(process.argv[1])";
 			const r = await $\`node -e \${code} \${payload}\`;
-			const data = r.stdout.json();
+			const data = r.stdout.json() as { a: number; b: string[] };
 			core.info("json=" + data.a + ":" + data.b.join(","));
 		`);
 		assert.equal(exitCode, 0);
@@ -471,7 +632,7 @@ describe('$ command runner', () => {
 		const { stdout, exitCode } = await runAction(`
 			const code = "process.stderr.write(JSON.stringify({ err: true }))";
 			const r = await $\`node -e \${code}\`;
-			core.info("stderr-json=" + r.stderr.json().err);
+			core.info("stderr-json=" + r.stderr.json<{ err: string }>().err);
 		`);
 		assert.equal(exitCode, 0);
 		assert.ok(stdout.includes('stderr-json=true'), stdout);
@@ -502,7 +663,7 @@ describe('$ command runner', () => {
 		const { stdout, exitCode } = await runAction(`
 			const payload = JSON.stringify({ ok: true, n: 41 });
 			const code = "process.stdout.write(process.argv[1])";
-			const data = await $\`node -e \${code} \${payload}\`.json();
+			const data = await $\`node -e \${code} \${payload}\`.json<{ ok: boolean; n: number }>();
 			core.info("paren-free=" + data.ok + ":" + (data.n + 1));
 		`);
 		assert.equal(exitCode, 0);
@@ -532,7 +693,7 @@ describe('$ command runner', () => {
 	it('builder.json() composes with modifiers chained before it', async () => {
 		const { stdout, exitCode } = await runAction(`
 			const code = "process.stdout.write(JSON.stringify({ v: process.env.MYVAR }))";
-			const data = await $\`node -e \${code}\`.env({ MYVAR: "via-env" }).json();
+			const data = await $\`node -e \${code}\`.env({ MYVAR: "via-env" }).json<{ v: string }>();
 			core.info("composed=" + data.v);
 		`);
 		assert.equal(exitCode, 0);
@@ -543,7 +704,7 @@ describe('$ command runner', () => {
 		const { stdout, exitCode } = await runAction(`
 			const payload = JSON.stringify({ ok: true, n: 7 });
 			const code = "process.stdout.write(process.argv[1])";
-			const data = await $\`node -e \${code} \${payload}\`.stdout.json();
+			const data = await $\`node -e \${code} \${payload}\`.stdout.json<{ ok: boolean; n: number }>();
 			core.info("lazy-stdout-json=" + data.ok + ":" + data.n);
 		`);
 		assert.equal(exitCode, 0);
@@ -576,7 +737,7 @@ describe('$ command runner', () => {
 			const sha = await $\`echo \${"v2"}\`.stdout.text();
 			core.info("lazy-text=[" + sha + "]");
 			const code = "process.stdout.write(JSON.stringify({ home: process.env.HOMEVAR }))";
-			const data = await $\`node -e \${code}\`.env({ HOMEVAR: "set" }).stdout.json();
+			const data = await $\`node -e \${code}\`.env({ HOMEVAR: "set" }).stdout.json<{ home: string }>();
 			core.info("lazy-composed=" + data.home);
 		`);
 		assert.equal(exitCode, 0);

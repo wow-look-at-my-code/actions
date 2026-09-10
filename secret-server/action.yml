@@ -59,9 +59,5 @@ runs:
         printf 'secrets<<%s\n%s\n%s\n' "$delimiter" "$SECRETS" "$delimiter" >> "$GITHUB_OUTPUT"
 
         # Export each secret as an environment variable using delimiter format
-        echo "${SECRETS}" | jq -r 'to_entries[] | .key' | while IFS= read -r key; do
-          val=$(echo "${SECRETS}" | jq -r --arg k "$key" '.[$k]')
-          echo "::add-mask::${val}"
-          delimiter="ghadelimiter_$(openssl rand -hex 8)"
-          printf '%s<<%s\n%s\n%s\n' "$key" "$delimiter" "$val" "$delimiter" >> "$GITHUB_ENV"
-        done
+        export SECRETS
+        bash "$GITHUB_ACTION_PATH/export-secrets.sh"

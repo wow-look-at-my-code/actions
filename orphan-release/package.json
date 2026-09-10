@@ -1,0 +1,10 @@
+{
+  "name": "orphan-release",
+  "version": "1.0.0",
+  "description": "Create orphan tags from a directory",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@actions/core": "^2.0.2"
+  }
+}

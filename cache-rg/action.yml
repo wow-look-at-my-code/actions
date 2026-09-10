@@ -35,6 +35,7 @@ runs:
       run: |
         set -euo pipefail
         if [ "$CACHE_HIT" != "true" ]; then
+          sudo apt-get update
           mkdir -p /tmp/cache-rg
           cd /tmp/cache-rg
           apt-get download ripgrep

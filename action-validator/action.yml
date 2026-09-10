@@ -27,11 +27,26 @@ runs:
           action-validator "$f"
         done
 
+    # see action-validator/README.md for why this is not action-validator's schema
     - name: Validate workflows
       shell: bash
+      env:
+        WORKFLOW_GLOB: ${{ inputs.workflows }}
       run: |
+        set -euo pipefail
         shopt -s nullglob
-        for f in ${{ inputs.workflows }}; do
-          echo "Validating $f"
-          action-validator "$f"
-        done
+        files=(${WORKFLOW_GLOB})
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "No workflow files matched '${WORKFLOW_GLOB}'; nothing to validate"
+          exit 0
+        fi
+        workdir="${RUNNER_TEMP}/action-validator-workflows"
+        mkdir -p "${workdir}"
+        curl -fsSL https://json.schemastore.org/github-workflow.json \
+          -o "${workdir}/github-workflow.json"
+        npm install --silent --no-fund --no-audit --prefix "${workdir}" \
+          ajv@8 ajv-formats@3 js-yaml@4
+        # ESM resolves from the script's own directory, so it runs beside node_modules.
+        cp "${GITHUB_ACTION_PATH}/validate-workflows.mjs" "${workdir}/"
+        node "${workdir}/validate-workflows.mjs" \
+          "${workdir}/github-workflow.json" "${files[@]}"

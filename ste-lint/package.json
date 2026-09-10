@@ -1,0 +1,10 @@
+{
+  "name": "ste-lint",
+  "version": "1.0.0",
+  "description": "Check prose against the mechanical subset of ASD-STE100 Simplified Technical English",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@actions/core": "^2.0.2"
+  }
+}
