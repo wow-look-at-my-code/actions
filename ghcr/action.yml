@@ -1,6 +1,6 @@
 name: GHCR
 version: 1
-description: Build, push, and prune container images on GHCR.
+description: Build, push, and prune container images on GHCR. Every build carries the OCI source and revision labels.
 
 inputs:
   token:
@@ -64,6 +64,8 @@ runs:
           await $`docker buildx build
             -f ${{ inputs.build_dockerfile }}
             -t ${{ inputs.push_image }}
+            --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            --label org.opencontainers.image.revision=${{ github.sha }}
             ${buildArgs}
             ${{ inputs.push == 'true' && '--push' || '' }}
             ${{ inputs.build_context }}`;
