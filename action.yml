@@ -1,0 +1,85 @@
+name: GHCR
+version: 1
+description: Build, push, and prune container images on GHCR. Every build carries the OCI source and revision labels.
+
+inputs:
+  token:
+    description: 'GHCR token for login and pruning (skips secret-server OIDC when set)'
+    required: false
+    default: ''
+  login:
+    description: 'Log in to GHCR'
+    required: false
+    default: 'true'
+  build:
+    description: 'Build the image with docker buildx'
+    required: false
+    default: 'true'
+  build_dockerfile:
+    description: 'Path to Dockerfile'
+    required: false
+    default: 'Dockerfile'
+  build_context:
+    description: 'Docker build context'
+    required: false
+    default: '.'
+  build_args:
+    description: 'Additional docker buildx --build-arg flags (newline-separated KEY=VALUE)'
+    required: false
+    default: ''
+  push:
+    description: 'Push the image to GHCR and prune old versions'
+    required: false
+    default: 'true'
+  push_image:
+    description: 'Full image reference (e.g., ghcr.io/owner/package:tag)'
+    required: false
+  push_keep:
+    description: 'Number of tagged versions to keep when pruning (0 to disable)'
+    required: false
+    default: '10'
+
+runs:
+  using: composite
+  steps:
+    - uses: wow-look-at-my/actions@secret-server#latest
+      if: inputs.login == 'true' && inputs.token == ''
+
+    - name: Login to GHCR
+      if: inputs.login == 'true'
+      uses: wow-look-at-my/actions@typescript#latest
+      with:
+        script: |
+          await $`docker login ghcr.io -u x-access-token --password-stdin`
+            .input('${{ inputs.token || env.GHCR_WRITE_TOKEN }}');
+
+    - name: Build
+      if: inputs.build == 'true'
+      uses: wow-look-at-my/actions@typescript#latest
+      with:
+        script: |
+          const buildArgs = '${{ inputs.build_args }}'.split('\n')
+            .filter(Boolean)
+            .flatMap((a: string) => ['--build-arg', a]);
+          await $`docker buildx build
+            -f ${{ inputs.build_dockerfile }}
+            -t ${{ inputs.push_image }}
+            --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            --label org.opencontainers.image.revision=${{ github.sha }}
+            ${buildArgs}
+            ${{ inputs.push == 'true' && '--push' || '' }}
+            ${{ inputs.build_context }}`;
+
+    - name: Push
+      if: inputs.build != 'true' && inputs.push == 'true'
+      uses: wow-look-at-my/actions@typescript#latest
+      with:
+        script: await $`docker push ${{ inputs.push_image }}`;
+
+    - uses: wow-look-at-my/actions@ghcr-prune#latest
+      if: inputs.push == 'true' && inputs.push_keep != '0'
+      with:
+        image: ${{ inputs.push_image }}
+        keep: ${{ inputs.push_keep }}
+      env:
+        GHCR_WRITE_TOKEN: ${{ inputs.token || env.GHCR_WRITE_TOKEN }}
