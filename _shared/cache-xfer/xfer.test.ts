@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -174,47 +173,7 @@ test('a unix-origin archive restores a file NT runs by its extension', {skip: un
 	trace.length = 0;
 	await unpackFromFile(archive, dest);
 	const restored = path.join(dest, 'hello.cmd');
-	if (!(await fsp.stat(restored).then(s => s.isFile(), () => false))) {
-		// Which side lost the files: list the archive's own entries.
-		const {dataOffset} = await readEnvelope(archive);
-		const payload = (await fsp.readFile(archive)).subarray(dataOffset);
-		const plainTar = path.join(base, 'payload.tar');
-		const unzstd = spawnSync('zstd', ['-d', '-c'], {input: payload});
-		await fsp.writeFile(plainTar, unzstd.stdout);
-		const listing = spawnSync('tar', ['-tvf', plainTar], {encoding: 'utf8'});
-		const fromFile = path.join(base, 'from-file');
-		await fsp.mkdir(fromFile);
-		const xFile = spawnSync('tar', ['-xvf', plainTar, '-C', fromFile.replace(/\\/g, '/')], {encoding: 'utf8'});
-		const fromStdin = path.join(base, 'from-stdin');
-		await fsp.mkdir(fromStdin);
-		const xStdin = spawnSync('tar', ['-xvf', '-', '-C', fromStdin.replace(/\\/g, '/')], {input: unzstd.stdout, encoding: 'utf8'});
-		const tarVersion = spawnSync('tar', ['--version'], {encoding: 'utf8'}).stdout.split('\n')[0];
-		// How zstd is driven: the flags, and a file stream against a buffer.
-		const probes: string[] = [];
-		for (const args of [['-d', '-T0', '-c'], ['-d', '-c']]) {
-			for (const how of ['stream', 'buffer']) {
-				const z = spawn('zstd', args, {stdio: ['pipe', 'pipe', 'pipe']});
-				let out = 0;
-				let err = '';
-				z.stdout.on('data', (c: Buffer) => (out += c.length));
-				z.stderr.on('data', (c: Buffer) => (err += c.toString()));
-				const closed = new Promise<number | null>(resolve => z.on('close', resolve));
-				if (how === 'stream') {
-					await pipeIntoStdin(fs.createReadStream(archive, {start: dataOffset}), z.stdin);
-				} else {
-					z.stdin.end(payload);
-				}
-				probes.push(`zstd ${args.join(' ')} from ${how}: exit ${await closed}, ${out} bytes out ${err.trim()}`);
-			}
-		}
-		assert.fail(
-			`probes:\n${probes.join('\n')}\n` +
-			`stages:\n${trace.join('\n')}\n` +
-			`hello.cmd was not restored; dest holds ${JSON.stringify(await fsp.readdir(dest).catch(() => 'nothing'))}; archive ${(await fsp.stat(archive)).size} bytes, tar payload ${unzstd.stdout.length} bytes listing:\n${listing.stdout}${listing.stderr}\n` +
-				`extract from file: status ${xFile.status} ${xFile.stdout}${xFile.stderr} -> ${JSON.stringify(await fsp.readdir(fromFile))}\n` +
-				`extract from stdin: status ${xStdin.status} ${xStdin.stdout}${xStdin.stderr} -> ${JSON.stringify(await fsp.readdir(fromStdin))}\n${tarVersion}`
-		);
-	}
+	assert.ok(await fsp.stat(restored).then(s => s.isFile(), () => false), `hello.cmd was not restored; dest holds ${JSON.stringify(await fsp.readdir(dest).catch(() => 'nothing'))}; stages:\n${trace.join('\\n')}`);
 	const run = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/c', `"${restored}"`], {encoding: 'utf8', windowsVerbatimArguments: true});
 	assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
 	assert.equal(run.stdout.trim(), 'restored');

@@ -155,6 +155,11 @@ export async function packToFile(sourcePath: string, archivePath: string, name: 
 		throw new Error(`path '${sourcePath}' is neither a regular file nor a directory`);
 	}
 
+	// Resolved before anything is spawned: every pipe below is wired in one
+	// tick. An await between a child and its consumer lets the child finish
+	// first, and on NT node drops what an exited child left unread in a pipe.
+	const tarSpec = header.mode === 'tar' ? await tarInvocation() : undefined;
+
 	const out = fs.createWriteStream(archivePath);
 	out.write(encodeEnvelope(header));
 
@@ -162,10 +167,9 @@ export async function packToFile(sourcePath: string, archivePath: string, name: 
 	const zstdErr = collectStderr(zstd);
 	const stages: Array<Promise<void>> = [pipeline(zstd.stdout, out), waitExit(zstd, 'zstd', zstdErr)];
 
-	if (header.mode === 'raw') {
+	if (tarSpec === undefined) {
 		stages.push(pipeIntoStdin(fs.createReadStream(sourcePath), zstd.stdin));
 	} else {
-		const tarSpec = await tarInvocation();
 		const tar = spawn(tarSpec.cmd, ['-cf', '-', ...tarSpec.extraArgs, '-C', tarSpec.fixPath(sourcePath), '.'], {
 			stdio: ['ignore', 'pipe', 'pipe']
 		});
@@ -197,12 +201,15 @@ export async function unpackFromFile(archivePath: string, destDir: string): Prom
 	const {header, dataOffset} = await readEnvelope(archivePath);
 	await fsp.mkdir(destDir, {recursive: true});
 
+	// Same rule as packToFile: no await between spawning zstd and consuming it.
+	const tarSpec = header.mode === 'tar' ? await tarInvocation() : undefined;
+
 	const src = fs.createReadStream(archivePath, {start: dataOffset});
 	const zstd = spawn('zstd', ZSTD_DECOMPRESS_ARGS, {stdio: ['pipe', 'pipe', 'pipe']});
 	const zstdErr = collectStderr(zstd);
 	const stages: Array<Promise<void>> = [pipeIntoStdin(src, zstd.stdin), waitExit(zstd, 'zstd', zstdErr)];
 
-	if (header.mode === 'raw') {
+	if (tarSpec === undefined) {
 		const destFile = path.join(destDir, header.basename as string);
 		stages.push(pipeline(zstd.stdout, fs.createWriteStream(destFile)));
 		await awaitStages(stages);
@@ -210,7 +217,6 @@ export async function unpackFromFile(archivePath: string, destDir: string): Prom
 			await fsp.chmod(destFile, header.fileMode);
 		}
 	} else {
-		const tarSpec = await tarInvocation();
 		const tar = spawn(tarSpec.cmd, ['-xf', '-', ...tarSpec.extraArgs, '-C', tarSpec.fixPath(destDir)], {
 			stdio: ['pipe', 'ignore', 'pipe']
 		});
