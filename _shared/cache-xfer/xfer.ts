@@ -17,6 +17,9 @@ import {EnvelopeHeader, MAX_HEADER_BYTES, encodeEnvelope, parseEnvelope} from '.
 const ZSTD_COMPRESS_ARGS = ['-T0', '--fast=2', '-c'];
 const ZSTD_DECOMPRESS_ARGS = ['-d', '-T0', '-c'];
 
+/** What each stage of the last pack or unpack did, for a test that has to explain an empty restore. */
+export const trace: string[] = [];
+
 /** Collect (a bounded tail of) a child's stderr for error messages. */
 function collectStderr(proc: ChildProcess): {read: () => string} {
 	let out = '';
@@ -28,6 +31,7 @@ function collectStderr(proc: ChildProcess): {read: () => string} {
 
 async function waitExit(proc: ChildProcess, name: string, stderr: {read: () => string}): Promise<void> {
 	const [code, signal] = (await once(proc, 'close')) as [number | null, string | null];
+	trace.push(`${name} exit code=${code} signal=${signal} stderr=${stderr.read()}`);
 	if (code !== 0) {
 		const detail = stderr.read();
 		throw new Error(`${name} exited with ${code === null ? `signal ${signal}` : `code ${code}`}${detail ? `: ${detail}` : ''}`);
@@ -66,10 +70,15 @@ const STDIN_TEARDOWN_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'EPIPE', 'EC
  * (a truncated archive, a read error) carry other codes and still propagate.
  */
 export async function pipeIntoStdin(source: NodeJS.ReadableStream, stdin: NodeJS.WritableStream): Promise<void> {
+	let bytes = 0;
+	source.on('data', (chunk: Buffer) => (bytes += chunk.length));
 	try {
 		await pipeline(source, stdin);
+		trace.push(`piped ${bytes} bytes`);
 	} catch (err) {
-		if (!STDIN_TEARDOWN_CODES.has(String((err as NodeJS.ErrnoException).code))) {
+		const code = String((err as NodeJS.ErrnoException).code);
+		trace.push(`piped ${bytes} bytes, then ${code}`);
+		if (!STDIN_TEARDOWN_CODES.has(code)) {
 			throw err;
 		}
 	}

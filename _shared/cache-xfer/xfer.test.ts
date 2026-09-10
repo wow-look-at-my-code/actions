@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import {test} from 'node:test';
 import {spawn, spawnSync} from 'node:child_process';
 import {Readable} from 'node:stream';
-import {packToFile, pipeIntoStdin, readEnvelope, unpackFromFile} from './xfer';
+import {packToFile, pipeIntoStdin, readEnvelope, trace, unpackFromFile} from './xfer';
 
 // Local pack/unpack round-trips (spawns real tar + zstd; no cache service).
 
@@ -170,6 +170,7 @@ test('a unix-origin archive restores a file NT runs by its extension', {skip: un
 	const archive = path.join(base, 'handoff.wxfr');
 	await packToFile(path.join(base, 'out'), archive, 'ape-binary-Linux', 'linux');
 	const dest = path.join(base, 'dest');
+	trace.length = 0;
 	await unpackFromFile(archive, dest);
 	const restored = path.join(dest, 'hello.cmd');
 	if (!(await fsp.stat(restored).then(s => s.isFile(), () => false))) {
@@ -188,6 +189,7 @@ test('a unix-origin archive restores a file NT runs by its extension', {skip: un
 		const xStdin = spawnSync('tar', ['-xvf', '-', '-C', fromStdin.replace(/\\/g, '/')], {input: unzstd.stdout, encoding: 'utf8'});
 		const tarVersion = spawnSync('tar', ['--version'], {encoding: 'utf8'}).stdout.split('\n')[0];
 		assert.fail(
+			`stages:\n${trace.join('\n')}\n` +
 			`hello.cmd was not restored; dest holds ${JSON.stringify(await fsp.readdir(dest).catch(() => 'nothing'))}; archive ${(await fsp.stat(archive)).size} bytes, tar payload ${unzstd.stdout.length} bytes listing:\n${listing.stdout}${listing.stderr}\n` +
 				`extract from file: status ${xFile.status} ${xFile.stdout}${xFile.stderr} -> ${JSON.stringify(await fsp.readdir(fromFile))}\n` +
 				`extract from stdin: status ${xStdin.status} ${xStdin.stdout}${xStdin.stderr} -> ${JSON.stringify(await fsp.readdir(fromStdin))}\n${tarVersion}`
