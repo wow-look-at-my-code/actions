@@ -17,6 +17,9 @@ import {EnvelopeHeader, MAX_HEADER_BYTES, encodeEnvelope, parseEnvelope} from '.
 const ZSTD_COMPRESS_ARGS = ['-T0', '--fast=2', '-c'];
 const ZSTD_DECOMPRESS_ARGS = ['-d', '-T0', '-c'];
 
+/** What each stage of the last pack or unpack did, for a test that has to explain an empty restore. */
+export const trace: string[] = [];
+
 /** Collect (a bounded tail of) a child's stderr for error messages. */
 function collectStderr(proc: ChildProcess): {read: () => string} {
 	let out = '';
@@ -28,6 +31,7 @@ function collectStderr(proc: ChildProcess): {read: () => string} {
 
 async function waitExit(proc: ChildProcess, name: string, stderr: {read: () => string}): Promise<void> {
 	const [code, signal] = (await once(proc, 'close')) as [number | null, string | null];
+	trace.push(`${name} exit code=${code} signal=${signal} stderr=${stderr.read()}`);
 	if (code !== 0) {
 		const detail = stderr.read();
 		throw new Error(`${name} exited with ${code === null ? `signal ${signal}` : `code ${code}`}${detail ? `: ${detail}` : ''}`);
@@ -45,8 +49,10 @@ async function waitExit(proc: ChildProcess, name: string, stderr: {read: () => s
  *   ECANCELED                  — writes were still queued when the pipe was
  *                                torn down, so the runtime cancelled them
  *   ERR_STREAM_DESTROYED       — a write was issued after the teardown
+ *   EOF                        — NT's spelling of EPIPE: a write reached a
+ *                                pipe the child had closed
  */
-const STDIN_TEARDOWN_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'EPIPE', 'ECANCELED', 'ERR_STREAM_DESTROYED']);
+const STDIN_TEARDOWN_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'EPIPE', 'ECANCELED', 'ERR_STREAM_DESTROYED', 'EOF']);
 
 /**
  * Feed `source` into a child's stdin.
@@ -64,10 +70,15 @@ const STDIN_TEARDOWN_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'EPIPE', 'EC
  * (a truncated archive, a read error) carry other codes and still propagate.
  */
 export async function pipeIntoStdin(source: NodeJS.ReadableStream, stdin: NodeJS.WritableStream): Promise<void> {
+	let bytes = 0;
+	source.on('data', (chunk: Buffer) => (bytes += chunk.length));
 	try {
 		await pipeline(source, stdin);
+		trace.push(`piped ${bytes} bytes`);
 	} catch (err) {
-		if (!STDIN_TEARDOWN_CODES.has(String((err as NodeJS.ErrnoException).code))) {
+		const code = String((err as NodeJS.ErrnoException).code);
+		trace.push(`piped ${bytes} bytes, then ${code}`);
+		if (!STDIN_TEARDOWN_CODES.has(code)) {
 			throw err;
 		}
 	}
@@ -120,7 +131,7 @@ async function tarInvocation(): Promise<{cmd: string; extraArgs: string[]; fixPa
  * by tar). Nothing is ever buffered whole in JS — header write aside, both
  * paths are pure child-process streaming.
  */
-export async function packToFile(sourcePath: string, archivePath: string, name: string): Promise<EnvelopeHeader> {
+export async function packToFile(sourcePath: string, archivePath: string, name: string, producer: string = process.platform): Promise<EnvelopeHeader> {
 	let stats: fs.Stats;
 	try {
 		stats = await fsp.stat(sourcePath);
@@ -135,13 +146,19 @@ export async function packToFile(sourcePath: string, archivePath: string, name: 
 			codec: 'zstd',
 			name,
 			basename: path.basename(path.resolve(sourcePath)),
-			fileMode: stats.mode & 0o7777
+			fileMode: stats.mode & 0o7777,
+			producer
 		};
 	} else if (stats.isDirectory()) {
-		header = {mode: 'tar', codec: 'zstd', name};
+		header = {mode: 'tar', codec: 'zstd', name, producer};
 	} else {
 		throw new Error(`path '${sourcePath}' is neither a regular file nor a directory`);
 	}
+
+	// Resolved before anything is spawned: every pipe below is wired in one
+	// tick. An await between a child and its consumer lets the child finish
+	// first, and on NT node drops what an exited child left unread in a pipe.
+	const tarSpec = header.mode === 'tar' ? await tarInvocation() : undefined;
 
 	const out = fs.createWriteStream(archivePath);
 	out.write(encodeEnvelope(header));
@@ -150,10 +167,9 @@ export async function packToFile(sourcePath: string, archivePath: string, name: 
 	const zstdErr = collectStderr(zstd);
 	const stages: Array<Promise<void>> = [pipeline(zstd.stdout, out), waitExit(zstd, 'zstd', zstdErr)];
 
-	if (header.mode === 'raw') {
+	if (tarSpec === undefined) {
 		stages.push(pipeIntoStdin(fs.createReadStream(sourcePath), zstd.stdin));
 	} else {
-		const tarSpec = await tarInvocation();
 		const tar = spawn(tarSpec.cmd, ['-cf', '-', ...tarSpec.extraArgs, '-C', tarSpec.fixPath(sourcePath), '.'], {
 			stdio: ['ignore', 'pipe', 'pipe']
 		});
@@ -185,12 +201,15 @@ export async function unpackFromFile(archivePath: string, destDir: string): Prom
 	const {header, dataOffset} = await readEnvelope(archivePath);
 	await fsp.mkdir(destDir, {recursive: true});
 
+	// Same rule as packToFile: no await between spawning zstd and consuming it.
+	const tarSpec = header.mode === 'tar' ? await tarInvocation() : undefined;
+
 	const src = fs.createReadStream(archivePath, {start: dataOffset});
 	const zstd = spawn('zstd', ZSTD_DECOMPRESS_ARGS, {stdio: ['pipe', 'pipe', 'pipe']});
 	const zstdErr = collectStderr(zstd);
 	const stages: Array<Promise<void>> = [pipeIntoStdin(src, zstd.stdin), waitExit(zstd, 'zstd', zstdErr)];
 
-	if (header.mode === 'raw') {
+	if (tarSpec === undefined) {
 		const destFile = path.join(destDir, header.basename as string);
 		stages.push(pipeline(zstd.stdout, fs.createWriteStream(destFile)));
 		await awaitStages(stages);
@@ -198,7 +217,6 @@ export async function unpackFromFile(archivePath: string, destDir: string): Prom
 			await fsp.chmod(destFile, header.fileMode);
 		}
 	} else {
-		const tarSpec = await tarInvocation();
 		const tar = spawn(tarSpec.cmd, ['-xf', '-', ...tarSpec.extraArgs, '-C', tarSpec.fixPath(destDir)], {
 			stdio: ['pipe', 'ignore', 'pipe']
 		});
@@ -206,5 +224,26 @@ export async function unpackFromFile(archivePath: string, destDir: string): Prom
 		stages.push(pipeIntoStdin(zstd.stdout, tar.stdin), waitExit(tar, 'tar', tarErr));
 		await awaitStages(stages);
 	}
+	if (header.producer === 'win32' && process.platform !== 'win32') {
+		await markExecutable(destDir);
+	}
 	return header;
+}
+
+/**
+ * A win32 producer has no exec bit to record, so its archive restores every
+ * file as plain data on unix. The files a Windows leg hands over are the
+ * binaries it built, so every regular file gets the exec bits its read bits
+ * allow.
+ */
+async function markExecutable(dir: string): Promise<void> {
+	for (const entry of await fsp.readdir(dir, {withFileTypes: true})) {
+		const p = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			await markExecutable(p);
+		} else if (entry.isFile()) {
+			const mode = (await fsp.stat(p)).mode & 0o7777;
+			await fsp.chmod(p, mode | ((mode & 0o444) >> 2));
+		}
+	}
 }
