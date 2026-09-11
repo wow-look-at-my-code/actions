@@ -160,6 +160,11 @@ export function currentEvent(): Event {
 	}
 }
 
+// The diff of a large change runs past Node's 1 MiB default, and execFileSync
+// answers that with ENOBUFS. The catch in scopeOf then reads it as "the base is
+// unreachable" and lints the whole tree, which turns a change that touched no
+// prose at all red on prose it did not write. A size that decides the scope is
+// a cliff, so there is no cap here: git holds the same bytes to write them.
 function runGit(args: string[]): string {
-	return execFileSync('git', args, {encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe']});
+	return execFileSync('git', args, {encoding: 'utf-8', maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe']});
 }

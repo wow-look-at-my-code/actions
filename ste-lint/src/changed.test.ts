@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {test} from 'node:test';
 import {baseOf, changedLines, onTouchedLines, parseHunks, scopeOf} from './changed';
 
@@ -122,4 +126,33 @@ test('an event with no base widens the scope too', () => {
 	const scope = scopeOf({name: 'schedule', payload: {}}, () => '');
 	assert.equal(scope.touched, null);
 	assert.match(scope.note, /whole tree/);
+});
+
+test('a diff past the 1 MiB default buffer is read, not reported as an unreachable base', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'ste-lint-'));
+	const git = (args: string[]): string => execFileSync('git', ['-C', dir, ...args], {encoding: 'utf-8', maxBuffer: Infinity});
+	git(['init', '--quiet']);
+	git(['config', 'user.email', 'test@example.com']);
+	git(['config', 'user.name', 'test']);
+	writeFileSync(join(dir, 'README.md'), 'intro\n');
+	git(['add', '-A']);
+	git(['commit', '--quiet', '-m', 'base']);
+	const base = git(['rev-parse', 'HEAD']).trim();
+
+	const big = Array.from({length: 60000}, (_, i) => `line ${i} of a change that runs past a megabyte`).join('\n');
+	writeFileSync(join(dir, 'big.md'), `${big}\n`);
+	git(['add', '-A']);
+	git(['commit', '--quiet', '-m', 'big']);
+	assert.ok(git(['diff', '--unified=0', base, 'HEAD']).length > 1024 * 1024);
+
+	const cwd = process.cwd();
+	process.chdir(dir);
+	try {
+		const scope = scopeOf({name: 'push', payload: {before: base}});
+		assert.equal(scope.touched?.get('big.md')?.size, 60000);
+		assert.match(scope.note, /scoped to/);
+	} finally {
+		process.chdir(cwd);
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
